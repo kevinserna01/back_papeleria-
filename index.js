@@ -7,6 +7,15 @@ require('dotenv').config();
 
 const app = express();
 
+// Configuración específica de CORS
+const corsOptions = {
+    origin: ['http://localhost:5173', 'http://0.0.0.0:5001'], // Permitir ambas URLs
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Accept', 'Authorization'],
+    credentials: true, // Permite credenciales
+    optionsSuccessStatus: 200
+};
+
 // Middleware para analizar datos codificados y JSON
 app.use(urlencoded({ extended: true }));
 app.use(json());
