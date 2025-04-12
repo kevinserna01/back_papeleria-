@@ -7,14 +7,17 @@ require('dotenv').config();
 
 const app = express();
 
-// Configuración específica de CORS
 const corsOptions = {
-    origin: ['http://localhost:5173', 'http://0.0.0.0:5001'], // Permitir ambas URLs
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Accept', 'Authorization'],
+    origin: [
+      'http://localhost:5173', // Para desarrollo local
+      'https://back-papeleria-two.vercel.app', // Para producción
+      // Agrega otros orígenes permitidos si es necesario
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Métodos HTTP permitidos
+    allowedHeaders: ['Content-Type', 'Authorization'], // Headers permitidos
     credentials: true, // Permite credenciales
-    optionsSuccessStatus: 200
-};
+    optionsSuccessStatus: 200 // Para navegadores antiguos que no soportan 204
+  };
 
 // Middleware para analizar datos codificados y JSON
 app.use(urlencoded({ extended: true }));
