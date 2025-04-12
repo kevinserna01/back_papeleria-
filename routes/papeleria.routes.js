@@ -7,7 +7,7 @@ const { registertrabajador, loginTrabajador,logoutTrabajador,newProduct,getProdu
 dotenv.config({ path: './config.env' });
 
 
-// Conectar a MongoDB
+
 mongoose.connect(process.env.MONGO_URI)
    .then(() => {
        console.log('Conexión exitosa a MongoDB');
