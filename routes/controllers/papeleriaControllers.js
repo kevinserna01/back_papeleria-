@@ -292,125 +292,62 @@ const deleteProduct = async (req, res) => {
     });
   }
 };
-
-const createInventoryProduct = async (req, res) => {
-  try {
-    const db = await getDb();
-
-    const {
-      code,
-      nombre,
-      categoria,
-      existencias,
-      stockMinimo,
-      descripcion,
-      precio
-    } = req.body;
-
-    if (
-      !code || !nombre || !categoria || existencias == null ||
-      stockMinimo == null || !descripcion || precio == null
-    ) {
-      return res.status(400).json({
-        status: "Error",
-        message: "Todos los campos son obligatorios."
-      });
-    }
-
-    const existe = await db.collection('productos').findOne({ code });
-    if (existe) {
-      return res.status(409).json({
-        status: "Error",
-        message: "Ya existe un producto con este código."
-      });
-    }
-
-    const nuevoProducto = {
-      code,
-      nombre,
-      categoria,
-      existencias: Number(existencias),
-      stockMinimo: Number(stockMinimo),
-      descripcion,
-      precio: Number(precio),
-      lastUpdate: new Date()
-    };
-
-    await db.collection('productos').insertOne(nuevoProducto);
-
-    res.status(201).json({
-      status: "Success",
-      message: "Producto registrado en inventario.",
-      producto: nuevoProducto
-    });
-
-  } catch (error) {
-    res.status(500).json({
-      status: "Error",
-      message: "Error al crear el producto.",
-      error: error.message
-    });
-  }
-};
-
 const assignProductToInventory = async (req, res) => {
   try {
     const db = await getDb();
 
-    const { code, existencias, stockMinimo } = req.body;
+    const { code, stock, minStock } = req.body;
 
-    if (!code || existencias == null || stockMinimo == null) {
+    if (!code || stock == null || minStock == null) {
       return res.status(400).json({
         status: "Error",
-        message: "Todos los campos son obligatorios."
+        message: "Todos los campos son obligatorios (código, stock y stock mínimo)."
       });
     }
 
-    // Verificar si el producto existe en 'productos'
-    const producto = await db.collection('productos').findOne({ code });
-    if (!producto) {
+    const product = await db.collection('productos').findOne({ code });
+    if (!product) {
       return res.status(404).json({
         status: "Error",
         message: "No se encontró un producto con ese código."
       });
     }
 
-    // Verificar si ya está en el inventario
-    const yaRegistrado = await db.collection('inventario').findOne({ code });
-    if (yaRegistrado) {
+    const alreadyInInventory = await db.collection('inventario').findOne({ code });
+    if (alreadyInInventory) {
       return res.status(409).json({
         status: "Error",
-        message: "Este producto ya forma parte del inventario."
+        message: "Este producto ya está en el inventario."
       });
     }
 
-    // Crear el producto en la colección de inventario
-    const nuevoInventario = {
-      code,
-      nombre: producto.nombre,
-      categoria: producto.categoria,
-      existencias: Number(existencias),
-      stockMinimo: Number(stockMinimo),
+    const inventoryItem = {
+      code: product.code,
+      name: product.nombre,
+      category: product.categoria,
+      stock: Number(stock),
+      minStock: Number(minStock),
       lastUpdate: new Date()
     };
 
-    await db.collection('inventario').insertOne(nuevoInventario);
+    await db.collection('inventario').insertOne(inventoryItem);
 
     return res.status(201).json({
       status: "Success",
-      message: "Producto agregado al inventario.",
-      data: nuevoInventario
+      message: "Producto asignado al inventario correctamente.",
+      data: inventoryItem
     });
 
   } catch (error) {
-    console.error("Error al agregar al inventario:", error);
+    console.error("Error al asignar producto al inventario:", error);
     return res.status(500).json({
       status: "Error",
-      message: "Error interno al agregar el producto al inventario.",
+      message: "Error interno al asignar producto al inventario.",
       error: error.message
     });
   }
 };
+
 
 const getUnassignedInventoryProducts = async (req, res) => {
   try {
