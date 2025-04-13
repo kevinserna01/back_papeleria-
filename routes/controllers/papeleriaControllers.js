@@ -1,6 +1,6 @@
 const CryptoJS = require('crypto-js');
 const moment = require('moment-timezone'); 
-const { connectDb, getDb } = require('../../database/mongo'); 
+const { getDb }  = require('../../database/mongo'); 
 
 
 
@@ -109,18 +109,10 @@ const logoutTrabajador = async (req, res) => {
 
 const newProduct = async (req, res) => {
   try {
-    await connectDb();
-    const db = getDb();
+    const db = await getDb();
 
-    const {
-      name,
-      code,
-      price = 0,
-      category,
-      description = ''
-    } = req.body;
+    const { name, code, price = 0, category, description = '' } = req.body;
 
-    // Validaciones básicas
     if (!name || !code || !category) {
       return res.status(400).json({
         status: "Error",
@@ -135,7 +127,6 @@ const newProduct = async (req, res) => {
       });
     }
 
-    // Verificar que no exista el producto
     const existingProduct = await db.collection('productos').findOne({ code });
     if (existingProduct) {
       return res.status(409).json({
@@ -171,14 +162,14 @@ const newProduct = async (req, res) => {
     });
   }
 };
+
 const getProducts = async (req, res) => {
   try {
-    await connectDb();
-    const db = getDb();
+    const db = await getDb();
 
     const productos = await db.collection('productos')
       .find({})
-      .sort({ createdAt: -1 }) // Más recientes primero
+      .sort({ createdAt: -1 })
       .toArray();
 
     if (productos.length === 0) {
@@ -204,10 +195,10 @@ const getProducts = async (req, res) => {
     });
   }
 };
+
 const updateProduct = async (req, res) => {
   try {
-    await connectDb();
-    const db = getDb();
+    const db = await getDb();
 
     const { code, name, price, category, description } = req.body;
 
@@ -257,8 +248,7 @@ const updateProduct = async (req, res) => {
 
 const deleteProduct = async (req, res) => {
   try {
-    await connectDb();
-    const db = getDb();
+    const db = await getDb();
 
     const { code } = req.body;
 
@@ -269,7 +259,6 @@ const deleteProduct = async (req, res) => {
       });
     }
 
-    // Buscar el producto
     const productToDelete = await db.collection('productos').findOne({ code });
 
     if (!productToDelete) {
@@ -279,7 +268,6 @@ const deleteProduct = async (req, res) => {
       });
     }
 
-    // Guardar en logproduct
     const logEntry = {
       ...productToDelete,
       deletedAt: new Date()
@@ -287,7 +275,6 @@ const deleteProduct = async (req, res) => {
 
     await db.collection('logproduct').insertOne(logEntry);
 
-    // Eliminar de productos
     await db.collection('productos').deleteOne({ code });
 
     res.status(200).json({
@@ -305,10 +292,10 @@ const deleteProduct = async (req, res) => {
     });
   }
 };
+
 const createInventoryProduct = async (req, res) => {
   try {
-    await connectDb();
-    const db = getDb();
+    const db = await getDb();
 
     const {
       code,
@@ -330,7 +317,6 @@ const createInventoryProduct = async (req, res) => {
       });
     }
 
-    // Verificar si el producto ya existe
     const existe = await db.collection('productos').findOne({ code });
     if (existe) {
       return res.status(409).json({
