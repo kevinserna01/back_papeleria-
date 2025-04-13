@@ -374,6 +374,55 @@ const getInventoryProducts = async (req, res) => {
   }
 };
 
+const updateInventoryProduct = async (req, res) => {
+  try {
+    const db = await getDb();
+
+    const { code, stock, minStock } = req.body;
+
+    if (!code || stock == null || minStock == null) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Todos los campos son obligatorios (código, stock y stock mínimo)."
+      });
+    }
+
+    const result = await db.collection('inventario').findOneAndUpdate(
+      { code },
+      {
+        $set: {
+          stock: Number(stock),
+          minStock: Number(minStock),
+          lastUpdate: new Date()
+        }
+      },
+      { returnDocument: "after" } // Devuelve el documento actualizado
+    );
+
+    if (!result.value) {
+      return res.status(404).json({
+        status: "Error",
+        message: "No se encontró un producto con ese código en el inventario."
+      });
+    }
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Producto actualizado correctamente en el inventario.",
+      data: result.value
+    });
+
+  } catch (error) {
+    console.error("Error al actualizar el inventario:", error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al actualizar el inventario.",
+      error: error.message
+    });
+  }
+};
+
+
 
 
 
@@ -397,6 +446,7 @@ module.exports = {
     updateProduct,
     deleteProduct,
     assignProductToInventory,
-    getInventoryProducts
+    getInventoryProducts,
+    updateInventoryProduct
     
 };
