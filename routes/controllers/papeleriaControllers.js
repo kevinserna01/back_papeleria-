@@ -470,6 +470,47 @@ const deleteInventoryProduct = async (req, res) => {
   }
 };
 
+const getProductsWithStock = async (req, res) => {
+  try {
+    const db = await getDb();
+
+    // Obtenemos todos los productos
+    const productos = await db.collection('productos').find().toArray();
+
+    // Obtenemos el inventario para acceder al stock por código
+    const inventario = await db.collection('inventario').find().toArray();
+
+    // Creamos un mapa del inventario por código para rápido acceso
+    const stockMap = {};
+    for (const item of inventario) {
+      stockMap[item.code] = item.stock;
+    }
+
+    // Unimos ambos arreglos por código
+    const productosConStock = productos.map(producto => ({
+      code: producto.code,
+      nombre: producto.nombre,
+      categoria: producto.categoria,
+      precio: producto.precio,
+      stock: stockMap[producto.code] || 0
+    }));
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Productos con stock obtenidos correctamente.",
+      data: productosConStock
+    });
+
+  } catch (error) {
+    console.error("Error al obtener productos con stock:", error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al obtener los productos con stock.",
+      error: error.message
+    });
+  }
+};
+
 
 
 
@@ -495,6 +536,7 @@ module.exports = {
     assignProductToInventory,
     getInventoryProducts,
     updateInventoryProduct,
-    deleteInventoryProduct
+    deleteInventoryProduct,
+    getProductsWithStock
     
 };
