@@ -341,33 +341,44 @@ const assignProductToInventory = async (req, res) => {
   }
 };
 
-
-
-
-const getUnassignedInventoryProducts = async (req, res) => {
+const getInventoryProducts = async (req, res) => {
   try {
     const db = await getDb();
 
-    const productos = await db.collection('productos').find().toArray();
-    const inventario = await db.collection('inventario').find().toArray();
+    const inventory = await db.collection('inventario')
+      .find({})
+      .sort({ lastUpdate: -1 })
+      .toArray();
 
-    const codigosInventariados = new Set(inventario.map(p => p.code));
-    const productosSinInventario = productos.filter(p => !codigosInventariados.has(p.code));
+    if (inventory.length === 0) {
+      return res.status(200).json({
+        status: "Success",
+        message: "No hay productos en el inventario aún.",
+        data: []
+      });
+    }
 
     return res.status(200).json({
       status: "Success",
-      message: "Productos sin inventario obtenidos correctamente.",
-      data: productosSinInventario
+      message: "Inventario obtenido correctamente.",
+      data: inventory
     });
 
   } catch (error) {
+    console.error("Error al obtener el inventario:", error);
     return res.status(500).json({
       status: "Error",
-      message: "Error al obtener los productos sin inventario.",
+      message: "Error interno al obtener el inventario.",
       error: error.message
     });
   }
 };
+
+
+
+
+
+
 
 
 
@@ -386,6 +397,6 @@ module.exports = {
     updateProduct,
     deleteProduct,
     assignProductToInventory,
-    getUnassignedInventoryProducts
+    getInventoryProducts
     
 };
