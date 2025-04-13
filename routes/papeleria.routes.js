@@ -2,7 +2,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 const router = express.Router();
 const mongoose = require('mongoose');
-const { registertrabajador, loginTrabajador,logoutTrabajador,newProduct,getProducts,updateProduct,deleteProduct,createInventoryProduct} =require('./controllers/papeleriaControllers');
+const { registertrabajador, loginTrabajador,logoutTrabajador,newProduct,getProducts,updateProduct,deleteProduct,createInventoryProduct,assignProductToInventory} =require('./controllers/papeleriaControllers');
 
 dotenv.config({ path: './config.env' });
 
@@ -24,6 +24,7 @@ mongoose.connect(process.env.MONGO_URI)
    router.put('/updateProductapi', updateProduct);
    router.delete('/deleteProductapi', deleteProduct);
    router.post('/createInventoryProductapi',createInventoryProduct);
+   router.post('/assignProductToInventoryapi',assignProductToInventory);
 
 
 

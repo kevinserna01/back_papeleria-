@@ -353,6 +353,92 @@ const createInventoryProduct = async (req, res) => {
   }
 };
 
+const assignProductToInventory = async (req, res) => {
+  try {
+    const db = await getDb();
+
+    const { code, existencias, stockMinimo } = req.body;
+
+    if (!code || existencias == null || stockMinimo == null) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Todos los campos son obligatorios."
+      });
+    }
+
+    // Verificar si el producto existe en 'productos'
+    const producto = await db.collection('productos').findOne({ code });
+    if (!producto) {
+      return res.status(404).json({
+        status: "Error",
+        message: "No se encontró un producto con ese código."
+      });
+    }
+
+    // Verificar si ya está en el inventario
+    const yaRegistrado = await db.collection('inventario').findOne({ code });
+    if (yaRegistrado) {
+      return res.status(409).json({
+        status: "Error",
+        message: "Este producto ya forma parte del inventario."
+      });
+    }
+
+    // Crear el producto en la colección de inventario
+    const nuevoInventario = {
+      code,
+      nombre: producto.nombre,
+      categoria: producto.categoria,
+      existencias: Number(existencias),
+      stockMinimo: Number(stockMinimo),
+      lastUpdate: new Date()
+    };
+
+    await db.collection('inventario').insertOne(nuevoInventario);
+
+    return res.status(201).json({
+      status: "Success",
+      message: "Producto agregado al inventario.",
+      data: nuevoInventario
+    });
+
+  } catch (error) {
+    console.error("Error al agregar al inventario:", error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al agregar el producto al inventario.",
+      error: error.message
+    });
+  }
+};
+
+const getUnassignedInventoryProducts = async (req, res) => {
+  try {
+    const db = await getDb();
+
+    const productos = await db.collection('productos').find().toArray();
+    const inventario = await db.collection('inventario').find().toArray();
+
+    const codigosInventariados = new Set(inventario.map(p => p.code));
+    const productosSinInventario = productos.filter(p => !codigosInventariados.has(p.code));
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Productos sin inventario obtenidos correctamente.",
+      data: productosSinInventario
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      status: "Error",
+      message: "Error al obtener los productos sin inventario.",
+      error: error.message
+    });
+  }
+};
+
+
+
 
 
 
