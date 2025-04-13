@@ -453,6 +453,8 @@ module.exports = {
     getProducts,
     updateProduct,
     deleteProduct,
-    createInventoryProduct
+    createInventoryProduct,
+    assignProductToInventory,
+    getUnassignedInventoryProducts
     
 };
