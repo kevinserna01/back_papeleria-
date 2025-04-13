@@ -474,43 +474,43 @@ const getProductsWithStock = async (req, res) => {
   try {
     const db = await getDb();
 
-    // Obtenemos todos los productos
     const productos = await db.collection('productos').find().toArray();
-
-    // Obtenemos el inventario para acceder al stock por código
     const inventario = await db.collection('inventario').find().toArray();
 
-    // Creamos un mapa del inventario por código para rápido acceso
+    // Creamos un mapa del inventario para acceder rápido al stock
     const stockMap = {};
     for (const item of inventario) {
-      stockMap[item.code] = item.stock;
+      if (item.stock > 0) {
+        stockMap[item.code] = item.stock;
+      }
     }
 
-    // Unimos ambos arreglos por código
-    const productosConStock = productos.map(producto => ({
-      code: producto.code,
-      nombre: producto.nombre,
-      categoria: producto.categoria,
-      precio: producto.precio,
-      stock: stockMap[producto.code] || 0
-    }));
+    // Solo productos que tengan stock
+    const productosConStock = productos
+      .filter(p => stockMap[p.code] !== undefined)
+      .map(p => ({
+        code: p.code,
+        nombre: p.name,
+        categoria: p.category,
+        precio: p.price,
+        stock: stockMap[p.code]
+      }));
 
     return res.status(200).json({
       status: "Success",
-      message: "Productos con stock obtenidos correctamente.",
+      message: "Productos con stock listos para la venta.",
       data: productosConStock
     });
 
   } catch (error) {
-    console.error("Error al obtener productos con stock:", error);
+    console.error("Error al listar productos para venta:", error);
     return res.status(500).json({
       status: "Error",
-      message: "Error interno al obtener los productos con stock.",
+      message: "Error al obtener los productos.",
       error: error.message
     });
   }
 };
-
 
 
 
