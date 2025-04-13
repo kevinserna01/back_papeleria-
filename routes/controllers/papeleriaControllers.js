@@ -336,7 +336,14 @@ const assignProductToInventory = async (req, res) => {
     return res.status(201).json({
       status: "Success",
       message: "Producto asignado al inventario correctamente.",
-      data: inventoryItem
+      data: {
+        code: inventoryItem.code,
+        name: inventoryItem.name,
+        category: inventoryItem.category,
+        stock: inventoryItem.stock,
+        minStock: inventoryItem.minStock,
+        lastUpdate: inventoryItem.lastUpdate
+      }
     });
 
   } catch (error) {
@@ -348,6 +355,7 @@ const assignProductToInventory = async (req, res) => {
     });
   }
 };
+
 
 
 const getUnassignedInventoryProducts = async (req, res) => {
