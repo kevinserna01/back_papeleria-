@@ -4,27 +4,23 @@ require('dotenv').config();
 const uri = process.env.MONGO_URI;
 
 const options = {
-  maxPoolSize: 10, // Mantenerlo pequeño para Vercel (serverless)
-  serverSelectionTimeoutMS: 5000, // Tiempo para esperar a que el servidor esté disponible
-  socketTimeoutMS: 30000,         // Tiempo máximo para operaciones de red
-  connectTimeoutMS: 10000,        // Tiempo máximo para conectar al cluster
-  family: 4,                      // Preferir IPv4
-  // ✅ keepAlive ya no es válido en MongoClient, por eso lo eliminamos
+  maxPoolSize: 10,
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 30000,
+  connectTimeoutMS: 10000,
+  family: 4, // Forzar IPv4
+  // ❌ No incluyas keepAlive, useUnifiedTopology, useNewUrlParser
 };
 
-let client;
-let db;
+let client = null;
+let db = null;
 
-// Solo una conexión para todas las llamadas (importante en Vercel/serverless)
 const connectDb = async () => {
   try {
     if (!client) {
       client = new MongoClient(uri, options);
       await client.connect();
       console.log('✅ MongoDB connected');
-
-      // No es necesario configurar eventos como 'timeout' manualmente aquí.
-      // MongoClient ya maneja reconexiones internamente en driver >= 5.x
     }
 
     if (!db) {
@@ -59,7 +55,7 @@ const closeConnection = async () => {
   }
 };
 
-// Manejo de cierre de la app (útil para local o procesos persistentes, no tanto en Vercel)
+// Por si corres el backend localmente o en servicios con procesos largos (no aplica en Vercel)
 process.on('SIGINT', async () => {
   await closeConnection();
   process.exit(0);
