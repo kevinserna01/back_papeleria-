@@ -3,84 +3,91 @@ require('dotenv').config();
 
 const uri = process.env.MONGO_URI;
 
-// Opciones de conexión optimizadas para Vercel
+// Opciones optimizadas para Vercel y producción
 const options = {
-    connectTimeoutMS: 10000, // 10 segundos
-    socketTimeoutMS: 45000,  // 45 segundos
-    maxPoolSize: 50,
-    wtimeoutMS: 25000,
-    retryWrites: true,
     useNewUrlParser: true,
-    useUnifiedTopology: true
+    useUnifiedTopology: true,
+    maxPoolSize: 10,
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+    family: 4,
+    keepAlive: true,
+    connectTimeoutMS: 10000,
 };
 
-const client = new MongoClient(uri, options);
-
-let db;
-let isConnecting = false;
+let client = null;
+let db = null;
 
 const connectDb = async () => {
     try {
-        if (!db && !isConnecting) {
-            isConnecting = true;
-            console.log('Iniciando conexión a MongoDB...');
-            
+        if (!client) {
+            client = new MongoClient(uri, options);
             await client.connect();
-            db = client.db(process.env.DB_NAME);
+            console.log('MongoDB connection established');
             
-            // Verificar la conexión
-            await db.command({ ping: 1 });
-            console.log('Conexión exitosa a MongoDB');
-            
-            // Manejar eventos de la conexión
-            client.on('error', (error) => {
-                console.error('Error en la conexión MongoDB:', error);
-                db = null;
-                isConnecting = false;
+            // Configurar event listeners para manejar reconexiones
+            client.on('connectionPoolCreated', (event) => {
+                console.log('Connection pool created');
             });
 
-            client.on('timeout', () => {
-                console.error('Timeout en la conexión MongoDB');
+            client.on('connectionPoolClosed', (event) => {
+                console.log('Connection pool closed');
+                client = null;
                 db = null;
-                isConnecting = false;
             });
 
-            client.on('close', () => {
-                console.log('Conexión MongoDB cerrada');
+            client.on('timeout', (event) => {
+                console.log('MongoDB operation timeout');
+                client = null;
                 db = null;
-                isConnecting = false;
             });
-
-            isConnecting = false;
         }
+
+        if (!db) {
+            db = client.db(process.env.DB_NAME);
+        }
+
+        // Verificar la conexión
+        await db.command({ ping: 1 });
         return db;
     } catch (error) {
-        console.error('Error al conectar a MongoDB:', error);
+        console.error('MongoDB connection error:', error);
+        // Limpiar las conexiones en caso de error
+        if (client) {
+            await client.close();
+            client = null;
+        }
         db = null;
-        isConnecting = false;
         throw error;
     }
 };
 
-const getDb = () => {
+const getDb = async () => {
     if (!db) {
-        throw new Error("No hay conexión a la base de datos. Intente nuevamente.");
+        db = await connectDb();
     }
     return db;
 };
 
-// Función para cerrar la conexión limpiamente
-const closeDb = async () => {
-    try {
-        if (client) {
-            await client.close();
-            db = null;
-            console.log('Conexión a MongoDB cerrada correctamente');
-        }
-    } catch (error) {
-        console.error('Error al cerrar la conexión:', error);
-        throw error;
+// Función para cerrar la conexión de manera limpia
+const closeConnection = async () => {
+    if (client) {
+        await client.close();
+        client = null;
+        db = null;
+        console.log('MongoDB connection closed');
     }
 };
 
-module.exports = { connectDb, getDb, closeDb };
+// Manejar el cierre de la aplicación
+process.on('SIGINT', async () => {
+    await closeConnection();
+    process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+    await closeConnection();
+    process.exit(0);
+});
+
+module.exports = { connectDb, getDb, closeConnection };
