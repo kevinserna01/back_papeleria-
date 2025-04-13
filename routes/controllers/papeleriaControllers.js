@@ -297,20 +297,12 @@ const assignProductToInventory = async (req, res) => {
   try {
     const db = await getDb();
 
-    const { code, stock, minStock } = req.body;
+    const { code, name, category, stock, minStock } = req.body;
 
-    if (!code || stock == null || minStock == null) {
+    if (!code || !name || !category || stock == null || minStock == null) {
       return res.status(400).json({
         status: "Error",
-        message: "Todos los campos son obligatorios (código, stock y stock mínimo)."
-      });
-    }
-
-    const product = await db.collection('productos').findOne({ code });
-    if (!product) {
-      return res.status(404).json({
-        status: "Error",
-        message: "No se encontró un producto con ese código."
+        message: "Todos los campos son obligatorios (código, nombre, categoría, stock y stock mínimo)."
       });
     }
 
@@ -323,9 +315,9 @@ const assignProductToInventory = async (req, res) => {
     }
 
     const inventoryItem = {
-      code: product.code,
-      name: product.nombre,
-      category: product.categoria,
+      code,
+      name,
+      category,
       stock: Number(stock),
       minStock: Number(minStock),
       lastUpdate: new Date()
@@ -336,14 +328,7 @@ const assignProductToInventory = async (req, res) => {
     return res.status(201).json({
       status: "Success",
       message: "Producto asignado al inventario correctamente.",
-      data: {
-        code: inventoryItem.code,
-        name: inventoryItem.name,
-        category: inventoryItem.category,
-        stock: inventoryItem.stock,
-        minStock: inventoryItem.minStock,
-        lastUpdate: inventoryItem.lastUpdate
-      }
+      data: inventoryItem
     });
 
   } catch (error) {
@@ -355,6 +340,7 @@ const assignProductToInventory = async (req, res) => {
     });
   }
 };
+
 
 
 
