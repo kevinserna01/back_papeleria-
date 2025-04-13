@@ -422,6 +422,53 @@ const updateInventoryProduct = async (req, res) => {
   }
 };
 
+const deleteInventoryProduct = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { code } = req.body;
+
+    if (!code) {
+      return res.status(400).json({
+        status: "Error",
+        message: "El código del producto es obligatorio."
+      });
+    }
+
+    const product = await db.collection('inventario').findOne({ code });
+
+    if (!product) {
+      return res.status(404).json({
+        status: "Error",
+        message: "No se encontró un producto con ese código en el inventario."
+      });
+    }
+
+    // Registrar en loginventory antes de eliminar
+    const logEntry = {
+      ...product,
+      deletedAt: new Date()
+    };
+
+    await db.collection('loginventory').insertOne(logEntry);
+
+    // Eliminar el producto del inventario
+    await db.collection('inventario').deleteOne({ code });
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Producto eliminado del inventario y registrado en loginventory.",
+      data: logEntry
+    });
+
+  } catch (error) {
+    console.error("Error al eliminar el producto del inventario:", error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al eliminar el producto del inventario.",
+      error: error.message
+    });
+  }
+};
 
 
 
@@ -447,6 +494,7 @@ module.exports = {
     deleteProduct,
     assignProductToInventory,
     getInventoryProducts,
-    updateInventoryProduct
+    updateInventoryProduct,
+    deleteInventoryProduct
     
 };
