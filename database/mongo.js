@@ -3,91 +3,71 @@ require('dotenv').config();
 
 const uri = process.env.MONGO_URI;
 
-// Opciones optimizadas para Vercel y producción
 const options = {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-    maxPoolSize: 10,
-    serverSelectionTimeoutMS: 5000,
-    socketTimeoutMS: 45000,
-    family: 4,
-    keepAlive: true,
-    connectTimeoutMS: 10000,
+  maxPoolSize: 10, // Mantenerlo pequeño para Vercel (serverless)
+  serverSelectionTimeoutMS: 5000, // Tiempo para esperar a que el servidor esté disponible
+  socketTimeoutMS: 30000,         // Tiempo máximo para operaciones de red
+  connectTimeoutMS: 10000,        // Tiempo máximo para conectar al cluster
+  family: 4,                      // Preferir IPv4
+  // ✅ keepAlive ya no es válido en MongoClient, por eso lo eliminamos
 };
 
-let client = null;
-let db = null;
+let client;
+let db;
 
+// Solo una conexión para todas las llamadas (importante en Vercel/serverless)
 const connectDb = async () => {
-    try {
-        if (!client) {
-            client = new MongoClient(uri, options);
-            await client.connect();
-            console.log('MongoDB connection established');
-            
-            // Configurar event listeners para manejar reconexiones
-            client.on('connectionPoolCreated', (event) => {
-                console.log('Connection pool created');
-            });
+  try {
+    if (!client) {
+      client = new MongoClient(uri, options);
+      await client.connect();
+      console.log('✅ MongoDB connected');
 
-            client.on('connectionPoolClosed', (event) => {
-                console.log('Connection pool closed');
-                client = null;
-                db = null;
-            });
-
-            client.on('timeout', (event) => {
-                console.log('MongoDB operation timeout');
-                client = null;
-                db = null;
-            });
-        }
-
-        if (!db) {
-            db = client.db(process.env.DB_NAME);
-        }
-
-        // Verificar la conexión
-        await db.command({ ping: 1 });
-        return db;
-    } catch (error) {
-        console.error('MongoDB connection error:', error);
-        // Limpiar las conexiones en caso de error
-        if (client) {
-            await client.close();
-            client = null;
-        }
-        db = null;
-        throw error;
+      // No es necesario configurar eventos como 'timeout' manualmente aquí.
+      // MongoClient ya maneja reconexiones internamente en driver >= 5.x
     }
+
+    if (!db) {
+      db = client.db(process.env.DB_NAME);
+    }
+
+    return db;
+  } catch (error) {
+    console.error('❌ MongoDB connection error:', error);
+    if (client) {
+      await client.close();
+      client = null;
+    }
+    db = null;
+    throw error;
+  }
 };
 
 const getDb = async () => {
-    if (!db) {
-        db = await connectDb();
-    }
-    return db;
+  if (!db) {
+    db = await connectDb();
+  }
+  return db;
 };
 
-// Función para cerrar la conexión de manera limpia
 const closeConnection = async () => {
-    if (client) {
-        await client.close();
-        client = null;
-        db = null;
-        console.log('MongoDB connection closed');
-    }
+  if (client) {
+    await client.close();
+    client = null;
+    db = null;
+    console.log('🛑 MongoDB connection closed');
+  }
 };
 
-// Manejar el cierre de la aplicación
+// Manejo de cierre de la app (útil para local o procesos persistentes, no tanto en Vercel)
 process.on('SIGINT', async () => {
-    await closeConnection();
-    process.exit(0);
+  await closeConnection();
+  process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-    await closeConnection();
-    process.exit(0);
+  await closeConnection();
+  process.exit(0);
 });
 
 module.exports = { connectDb, getDb, closeConnection };
