@@ -528,7 +528,7 @@ const createSale = async (req, res) => {
       });
     }
 
-    if (!metodoPago || !['efectivo', 'nequi', 'transferencia'].includes(metodoPago)) {
+    if (!metodoPago || !['Efectivo', 'Nequi', 'Transferencia'].includes(metodoPago)) {
       return res.status(400).json({
         status: "Error",
         message: "Debe especificar un método de pago válido."
