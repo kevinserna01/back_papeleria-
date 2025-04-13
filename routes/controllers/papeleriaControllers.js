@@ -292,6 +292,7 @@ const deleteProduct = async (req, res) => {
     });
   }
 };
+
 const assignProductToInventory = async (req, res) => {
   try {
     const db = await getDb();
@@ -390,7 +391,6 @@ module.exports = {
     getProducts,
     updateProduct,
     deleteProduct,
-    createInventoryProduct,
     assignProductToInventory,
     getUnassignedInventoryProducts
     
