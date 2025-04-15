@@ -1,7 +1,7 @@
 const CryptoJS = require('crypto-js');
-const moment = require('moment-timezone'); 
-const { getDb }  = require('../../database/mongo'); 
 const moment = require('moment-timezone');
+const { getDb }  = require('../../database/mongo'); 
+
 
 
 const registertrabajador = async (req, res) => {
