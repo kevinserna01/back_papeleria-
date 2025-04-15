@@ -4,7 +4,6 @@ const { getDb }  = require('../../database/mongo');
 const moment = require('moment-timezone');
 
 
-
 const registertrabajador = async (req, res) => {
     const { nombre, fecha, cedula, correo, celular, ciudad, contraseña } = req.body;
   
