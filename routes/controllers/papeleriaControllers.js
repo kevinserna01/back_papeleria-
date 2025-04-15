@@ -636,38 +636,50 @@ const createSale = async (req, res) => {
   }
 };
 
-const checkSaleCode = async (req, res) => {
+
+const checkAndReserveSaleCode = async (req, res) => {
   try {
     const db = await getDb();
     const { code } = req.params;
 
-    if (!code) {
-      return res.status(400).json({
-        exists: false,
-        message: "Código no proporcionado."
-      });
+    const ventasCol = db.collection('ventas');
+    const reservadosCol = db.collection('codigosReservados');
+
+    const yaExiste = await ventasCol.findOne({ code });
+    const yaReservado = await reservadosCol.findOne({ code });
+
+    if (yaExiste || yaReservado) {
+      return res.status(200).json({ reserved: false });
     }
 
-    const venta = await db.collection('ventas').findOne({ code });
-
-    if (venta) {
-      return res.status(200).json({
-        exists: true,
-        message: `El código ${code} ya existe en el sistema.`
-      });
-    } else {
-      return res.status(200).json({
-        exists: false,
-        message: `El código ${code} está disponible.`
-      });
-    }
-  } catch (error) {
-    console.error("Error al verificar código de venta:", error);
-    res.status(500).json({
-      exists: false,
-      message: "Error interno al verificar el código.",
-      error: error.message
+    // Reservar el código con timestamp (para limpieza futura si quieres usar cron)
+    await reservadosCol.insertOne({
+      code,
+      reservedAt: moment().tz("America/Bogota").toDate()
     });
+
+    res.status(200).json({ reserved: true });
+
+  } catch (error) {
+    console.error("Error al verificar y reservar el código:", error);
+    res.status(500).json({ reserved: false, error: error.message });
+  }
+};
+
+
+const releaseSaleCode = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { code } = req.params;
+
+    const reservadosCol = db.collection('codigosReservados');
+    await reservadosCol.deleteOne({ code });
+
+    res.status(200).json({ released: true });
+
+  } catch (error) {
+    console.error("Error al liberar código de venta:", error);
+    res.status(500).json({ released: false, error: error.message });
   }
 };
 
@@ -688,7 +700,8 @@ module.exports = {
     deleteInventoryProduct,
     getProductsWithStock,
     createSale,
-    checkSaleCode
+    checkAndReserveSaleCode,
+    releaseSaleCode
     
     
 };
