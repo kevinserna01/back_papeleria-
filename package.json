@@ -14,7 +14,7 @@
     "crypto-js": "^4.2.0",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
-    "moment-timezone": "^0.5.46",
+    "moment-timezone": "^0.5.48",
     "mongodb": "^5.7.0",
     "mongoose": "^8.13.2"
   }

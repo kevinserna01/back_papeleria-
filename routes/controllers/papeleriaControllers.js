@@ -1,6 +1,7 @@
 const CryptoJS = require('crypto-js');
 const moment = require('moment-timezone'); 
 const { getDb }  = require('../../database/mongo'); 
+const moment = require('moment-timezone');
 
 
 
@@ -518,7 +519,7 @@ const createSale = async (req, res) => {
     const {
       code, // <- nuevo campo obligatorio
       productos, // array con code, cantidad
-      metodoPago, // 'efectivo', 'nequi', 'transferencia'
+      metodoPago, // 'Efectivo', 'Nequi', 'Transferencia'
       cliente // opcional: { nombre, documento }
     } = req.body;
 
@@ -604,9 +605,13 @@ const createSale = async (req, res) => {
       );
     }
 
+    // Obtener hora local de Colombia
+    const horaColombia = moment().tz('America/Bogota').format('HH:mm:ss');
+
     const venta = {
-      code, // <- ahora la venta guarda su código personalizado
+      code,
       fecha: new Date(),
+      hora: horaColombia,
       cliente: cliente || null,
       productos: detalleVenta,
       totalVenta,
