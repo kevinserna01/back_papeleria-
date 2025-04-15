@@ -632,22 +632,42 @@ const createSale = async (req, res) => {
   }
 };
 
+const checkSaleCode = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { code } = req.params;
+
+    if (!code) {
+      return res.status(400).json({
+        exists: false,
+        message: "Código no proporcionado."
+      });
+    }
+
+    const venta = await db.collection('ventas').findOne({ code });
+
+    if (venta) {
+      return res.status(200).json({
+        exists: true,
+        message: `El código ${code} ya existe en el sistema.`
+      });
+    } else {
+      return res.status(200).json({
+        exists: false,
+        message: `El código ${code} está disponible.`
+      });
+    }
+  } catch (error) {
+    console.error("Error al verificar código de venta:", error);
+    res.status(500).json({
+      exists: false,
+      message: "Error interno al verificar el código.",
+      error: error.message
+    });
+  }
+};
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-  
 
 
 module.exports = {
@@ -663,6 +683,8 @@ module.exports = {
     updateInventoryProduct,
     deleteInventoryProduct,
     getProductsWithStock,
-    createSale
+    createSale,
+    checkSaleCode
+    
     
 };
