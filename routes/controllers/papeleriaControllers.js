@@ -516,10 +516,18 @@ const createSale = async (req, res) => {
   try {
     const db = await getDb();
     const {
+      code, // <- nuevo campo obligatorio
       productos, // array con code, cantidad
       metodoPago, // 'efectivo', 'nequi', 'transferencia'
       cliente // opcional: { nombre, documento }
     } = req.body;
+
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({
+        status: "Error",
+        message: "Debe proporcionar un código único para la venta (code)."
+      });
+    }
 
     if (!productos || !Array.isArray(productos) || productos.length === 0) {
       return res.status(400).json({
@@ -537,27 +545,37 @@ const createSale = async (req, res) => {
 
     const inventario = db.collection('inventario');
     const productosCol = db.collection('productos');
+    const ventasCol = db.collection('ventas');
+
+    // Verificar si ya existe una venta con ese código
+    const ventaExistente = await ventasCol.findOne({ code });
+    if (ventaExistente) {
+      return res.status(409).json({
+        status: "Error",
+        message: "Ya existe una venta con ese código."
+      });
+    }
 
     let totalVenta = 0;
     const detalleVenta = [];
 
     for (const item of productos) {
-      const { code, cantidad } = item;
+      const { code: productCode, cantidad } = item;
 
-      if (!code || cantidad <= 0) {
+      if (!productCode || cantidad <= 0) {
         return res.status(400).json({
           status: "Error",
           message: "Código de producto inválido o cantidad no válida."
         });
       }
 
-      const prodInventario = await inventario.findOne({ code });
-      const prodInfo = await productosCol.findOne({ code });
+      const prodInventario = await inventario.findOne({ code: productCode });
+      const prodInfo = await productosCol.findOne({ code: productCode });
 
       if (!prodInventario || !prodInfo) {
         return res.status(404).json({
           status: "Error",
-          message: `El producto con código ${code} no existe en inventario o en productos.`
+          message: `El producto con código ${productCode} no existe en inventario o productos.`
         });
       }
 
@@ -580,14 +598,14 @@ const createSale = async (req, res) => {
         total: subtotal
       });
 
-      // Actualizar stock
       await inventario.updateOne(
-        { code },
+        { code: productCode },
         { $inc: { stock: -cantidad }, $set: { lastUpdate: new Date() } }
       );
     }
 
     const venta = {
+      code, // <- ahora la venta guarda su código personalizado
       fecha: new Date(),
       cliente: cliente || null,
       productos: detalleVenta,
@@ -596,7 +614,7 @@ const createSale = async (req, res) => {
       createdAt: new Date()
     };
 
-    await db.collection('ventas').insertOne(venta);
+    await ventasCol.insertOne(venta);
 
     res.status(201).json({
       status: "Success",
@@ -613,6 +631,10 @@ const createSale = async (req, res) => {
     });
   }
 };
+
+
+
+
 
 
 
