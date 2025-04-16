@@ -683,6 +683,32 @@ const releaseSaleCode = async (req, res) => {
   }
 };
 
+const getLastRegisteredSaleCode = async (req, res) => {
+  try {
+    const db = await getDb();
+    const ventasCol = db.collection('ventas');
+
+    const ultimaVenta = await ventasCol
+      .find({})
+      .sort({ createdAt: -1 }) // Orden descendente por fecha de creación
+      .limit(1)
+      .toArray();
+
+    if (ultimaVenta.length === 0) {
+      return res.status(200).json({ lastCode: null });
+    }
+
+    return res.status(200).json({ lastCode: ultimaVenta[0].code });
+    
+  } catch (error) {
+    console.error("Error al obtener el último código de venta:", error);
+    res.status(500).json({
+      status: "Error",
+      message: "No se pudo obtener el último código de venta.",
+      error: error.message
+    });
+  }
+};
 
 
 
@@ -701,7 +727,8 @@ module.exports = {
     getProductsWithStock,
     createSale,
     checkAndReserveSaleCode,
-    releaseSaleCode
+    releaseSaleCode,
+    getLastRegisteredSaleCode
     
     
 };
