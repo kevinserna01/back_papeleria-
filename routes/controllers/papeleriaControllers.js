@@ -709,6 +709,42 @@ const getLastRegisteredSaleCode = async (req, res) => {
     });
   }
 };
+const getAllSales = async (req, res) => {
+  try {
+    const db = await getDb();
+    const ventasCol = db.collection('ventas');
+
+    const { desde, hasta } = req.query;
+
+    const query = {};
+
+    if (desde || hasta) {
+      query.fecha = {};
+      if (desde) query.fecha.$gte = new Date(desde);
+      if (hasta) query.fecha.$lte = new Date(hasta);
+    }
+
+    const ventas = await ventasCol
+      .find(query)
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    // Agregar campo de fecha en hora Colombia
+    const ventasConFormato = ventas.map(v => ({
+      ...v,
+      fechaColombia: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
+    }));
+
+    res.status(200).json(ventasConFormato);
+  } catch (error) {
+    console.error("Error al obtener las ventas:", error);
+    res.status(500).json({
+      status: "Error",
+      message: "No se pudieron obtener las ventas.",
+      error: error.message
+    });
+  }
+};
 
 
 
@@ -728,7 +764,8 @@ module.exports = {
     createSale,
     checkAndReserveSaleCode,
     releaseSaleCode,
-    getLastRegisteredSaleCode
+    getLastRegisteredSaleCode,
+    getAllSales
     
     
 };
