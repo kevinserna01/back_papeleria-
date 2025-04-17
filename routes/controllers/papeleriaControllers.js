@@ -916,8 +916,8 @@ const getDailyReportData = async (req, res) => {
     const ventasCol = db.collection('ventas');
     const productosCol = db.collection('productos');
 
-    // Aceptar 'startDate' o 'date' como fecha válida
     const dateParam = req.query.startDate || req.query.date;
+    const format = req.query.format; // puede ser "pdf", "excel" o undefined
 
     if (!dateParam) {
       return res.status(400).json({
@@ -941,7 +941,6 @@ const getDailyReportData = async (req, res) => {
 
     const totalVentas = ventas.reduce((sum, v) => sum + v.totalVenta, 0);
 
-    // Calcular productos vendidos por categoría
     const categoriasTotales = {};
     for (const venta of ventas) {
       for (const p of venta.productos) {
@@ -951,15 +950,65 @@ const getDailyReportData = async (req, res) => {
       }
     }
 
-    return res.status(200).json({
+    const reportData = {
+      Fecha: dateParam,
+      TotalVentas: totalVentas,
+      VentasRealizadas: ventas.length,
+      Categorías: categoriasTotales
+    };
+
+    // Exportar PDF
+    if (format === 'pdf') {
+      const doc = new PDFDocument();
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename=report-day-${dateParam}.pdf`);
+      doc.pipe(res);
+
+      doc.fontSize(18).text(`Reporte Diario - ${dateParam}`, { align: 'center' });
+      doc.moveDown();
+
+      doc.fontSize(14).text(`Total Ventas: $${totalVentas.toFixed(2)}`);
+      doc.text(`Número de Ventas: ${ventas.length}`);
+      doc.moveDown();
+
+      doc.fontSize(16).text('Productos por Categoría:', { underline: true });
+      for (const [cat, cantidad] of Object.entries(categoriasTotales)) {
+        doc.fontSize(12).text(`${cat}: ${cantidad}`);
+      }
+
+      doc.end();
+      return;
+    }
+
+    // Exportar Excel
+    if (format === 'excel') {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet(`Reporte ${dateParam}`);
+
+      worksheet.addRow(['Fecha', dateParam]);
+      worksheet.addRow(['Total Ventas', totalVentas]);
+      worksheet.addRow(['Ventas Realizadas', ventas.length]);
+      worksheet.addRow([]);
+
+      worksheet.addRow(['Categoría', 'Cantidad']);
+      for (const [cat, cantidad] of Object.entries(categoriasTotales)) {
+        worksheet.addRow([cat, cantidad]);
+      }
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename=report-day-${dateParam}.xlsx`);
+      await workbook.xlsx.write(res);
+      res.end();
+      return;
+    }
+
+    // JSON por defecto
+    res.status(200).json({
       status: 'Success',
       message: 'Reporte diario generado correctamente.',
-      data: {
-        total: totalVentas,
-        ventas,
-        categorias: categoriasTotales
-      }
+      data: reportData
     });
+
   } catch (error) {
     console.error('Error en el reporte diario:', error);
     res.status(500).json({
@@ -969,6 +1018,7 @@ const getDailyReportData = async (req, res) => {
     });
   }
 };
+
 
 
 
