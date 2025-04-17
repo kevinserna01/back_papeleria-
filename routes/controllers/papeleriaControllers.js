@@ -933,28 +933,55 @@ const registeradmin = async (req, res) => {
   }
 };
 const loginadmin = async (req, res) => {
-  const { username, password } = req.body;
+  const { correo, contraseña } = req.body;
 
-  // ✅ Validación simple (puedes cambiar por una colección real si quieres)
-  const adminUsername = 'admin';
-  const adminPassword = 'admin123';
+  try {
+    const db = await getDb();
 
-  if (username === adminUsername && password === adminPassword) {
-    try {
-      // Generar el token
-      const token = jwt.sign({ role: 'admin', username }, process.env.JWT_SECRET, {
-        expiresIn: '1d',
+    // Buscar por correo
+    const admin = await db.collection('administradores').findOne({ correo });
+
+    if (!admin) {
+      return res.status(401).json({
+        status: "Error",
+        message: "Credenciales incorrectas"
       });
-
-      return res.status(200).json({
-        message: 'Login exitoso',
-        token, // Enviar el token al frontend
-      });
-    } catch (err) {
-      return res.status(500).json({ message: 'Error al generar el token' });
     }
-  } else {
-    return res.status(401).json({ message: 'Credenciales incorrectas' });
+
+    // Comparar contraseña hasheada
+    const hashedPassword = CryptoJS.SHA256(contraseña, process.env.CODE_SECRET_DATA).toString();
+
+    if (hashedPassword !== admin.password) {
+      return res.status(401).json({
+        status: "Error",
+        message: "Credenciales incorrectas"
+      });
+    }
+
+    // Generar token con el _id y el rol
+    const token = jwt.sign(
+      {
+        adminId: admin._id,
+        correo: admin.correo,
+        role: 'admin'
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '1d' }
+    );
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Login exitoso",
+      token
+    });
+
+  } catch (error) {
+    console.error('Error en loginadmin:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno del servidor",
+      error: error.message
+    });
   }
 };
 
