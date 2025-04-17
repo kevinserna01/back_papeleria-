@@ -753,6 +753,7 @@ const getReportsData = async (req, res) => {
   try {
     const db = await getDb();
     const ventasCol = db.collection('ventas');
+    const productosCol = db.collection('productos');
 
     const { startDate, endDate, type, format } = req.query;
 
@@ -774,6 +775,12 @@ const getReportsData = async (req, res) => {
     };
 
     const ventas = await ventasCol.find(query).toArray();
+    const productos = await productosCol.find().toArray();
+
+    const mapaCategorias = {};
+    productos.forEach(p => {
+      mapaCategorias[p._id.toString()] = p.categoria || 'Sin categoría';
+    });
 
     const buildVentas = () => ventas.map(v => ({
       Código: v.code,
@@ -800,7 +807,36 @@ const getReportsData = async (req, res) => {
         .sort((a, b) => b.Cantidad - a.Cantidad);
     };
 
-    // Si no se especifica un type, devolver todos los reportes
+    const buildCategorias = () => {
+      const categorias = {};
+
+      ventas.forEach(v => {
+        v.productos.forEach(p => {
+          const id = p._id?.toString() || p.productoId?.toString();
+          const cat = mapaCategorias[id] || 'Sin categoría';
+
+          if (!categorias[cat]) {
+            categorias[cat] = {
+              cantidad: 0,
+              total: 0
+            };
+          }
+
+          categorias[cat].cantidad += p.cantidad;
+          categorias[cat].total += (p.precio * p.cantidad);
+        });
+      });
+
+      return Object.entries(categorias).map(([cat, data]) => ({
+        Categoria: cat,
+        CantidadVendida: data.cantidad,
+        TotalGenerado: data.total
+      }));
+    };
+
+    // Validación de tipos permitidos
+    const tiposValidos = ['ventas', 'total', 'top', 'categorias'];
+
     if (!type) {
       return res.status(200).json({
         status: 'Success',
@@ -808,16 +844,16 @@ const getReportsData = async (req, res) => {
         data: {
           ventas: buildVentas(),
           total: buildTotal(),
-          top: buildTop()
+          top: buildTop(),
+          categorias: buildCategorias()
         }
       });
     }
 
-    // Si hay type, validar
-    if (!['ventas', 'total', 'top'].includes(type)) {
+    if (!tiposValidos.includes(type)) {
       return res.status(400).json({
         status: 'Error',
-        message: 'El parámetro "type" debe ser uno de: ventas, total, top.'
+        message: 'El parámetro "type" debe ser uno de: ventas, total, top, categorias.'
       });
     }
 
@@ -825,8 +861,8 @@ const getReportsData = async (req, res) => {
     if (type === 'ventas') report = buildVentas();
     if (type === 'total') report = buildTotal();
     if (type === 'top') report = buildTop();
+    if (type === 'categorias') report = buildCategorias();
 
-    // Si formato es PDF o Excel, generar archivo
     if (format === 'pdf') {
       const doc = new PDFDocument();
       res.setHeader('Content-Type', 'application/pdf');
@@ -874,6 +910,7 @@ const getReportsData = async (req, res) => {
     });
   }
 };
+
 
 
 // Middleware para verificar el token
