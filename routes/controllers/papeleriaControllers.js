@@ -918,7 +918,31 @@ const registeradmin = async (req, res) => {
     res.status(500).json({ status: "Error", message: "Internal Server Error" });
   }
 };
+const loginadmin = async (req, res) => {
+  const { username, password } = req.body;
 
+  // ✅ Validación simple (puedes cambiar por una colección real si quieres)
+  const adminUsername = 'admin';
+  const adminPassword = 'admin123';
+
+  if (username === adminUsername && password === adminPassword) {
+    try {
+      // Generar el token
+      const token = jwt.sign({ role: 'admin', username }, process.env.JWT_SECRET, {
+        expiresIn: '1d',
+      });
+
+      return res.status(200).json({
+        message: 'Login exitoso',
+        token, // Enviar el token al frontend
+      });
+    } catch (err) {
+      return res.status(500).json({ message: 'Error al generar el token' });
+    }
+  } else {
+    return res.status(401).json({ message: 'Credenciales incorrectas' });
+  }
+};
 
 
 module.exports = {
@@ -941,6 +965,7 @@ module.exports = {
     getAllSales,
     getReportsData,
     verifyToken,
-    registeradmin
+    registeradmin,
+    loginadmin
     
 };
