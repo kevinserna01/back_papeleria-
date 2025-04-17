@@ -754,7 +754,9 @@ const getReportsData = async (req, res) => {
     const db = await getDb();
     const ventasCol = db.collection('ventas');
 
-    const { startDate, endDate, type, format } = req.query;
+    // ✅ Acepta tanto GET como POST
+    const source = req.method === 'GET' ? req.query : req.body;
+    const { startDate, endDate, type, format } = source;
 
     if (!startDate || !endDate || !type) {
       return res.status(400).json({
@@ -763,8 +765,29 @@ const getReportsData = async (req, res) => {
       });
     }
 
+    if (!['ventas', 'total', 'top'].includes(type)) {
+      return res.status(400).json({
+        status: 'Error',
+        message: 'El parámetro "type" debe ser uno de: ventas, total, top.'
+      });
+    }
+
     const start = new Date(startDate);
     const end = new Date(endDate);
+
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({
+        status: 'Error',
+        message: 'Las fechas proporcionadas no son válidas. Usa formato YYYY-MM-DD.'
+      });
+    }
+
+    if (start > end) {
+      return res.status(400).json({
+        status: 'Error',
+        message: 'La fecha de inicio no puede ser posterior a la fecha de fin.'
+      });
+    }
 
     const query = {
       fecha: {
@@ -794,13 +817,9 @@ const getReportsData = async (req, res) => {
 
     else if (type === 'top') {
       const productosVendidos = {};
-
       ventas.forEach(v => {
         v.productos.forEach(p => {
-          if (!productosVendidos[p.name]) {
-            productosVendidos[p.name] = 0;
-          }
-          productosVendidos[p.name] += p.cantidad;
+          productosVendidos[p.name] = (productosVendidos[p.name] || 0) + p.cantidad;
         });
       });
 
@@ -809,11 +828,7 @@ const getReportsData = async (req, res) => {
         .sort((a, b) => b.Cantidad - a.Cantidad);
     }
 
-    else {
-      return res.status(400).json({ message: 'Tipo de reporte no válido.' });
-    }
-
-    // 📄 Si el formato es PDF
+    // 📄 PDF
     if (format === 'pdf') {
       const doc = new PDFDocument();
       res.setHeader('Content-Type', 'application/pdf');
@@ -833,7 +848,7 @@ const getReportsData = async (req, res) => {
       doc.end();
     }
 
-    // 📊 Si el formato es Excel
+    // 📊 Excel
     else if (format === 'excel') {
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet(`Reporte-${type}`);
@@ -855,7 +870,7 @@ const getReportsData = async (req, res) => {
       res.end();
     }
 
-    // 🧾 Respuesta JSON normal
+    // 🧾 JSON simple
     else {
       res.status(200).json(report);
     }
