@@ -1,5 +1,7 @@
 const CryptoJS = require('crypto-js');
 const moment = require('moment-timezone');
+const PDFDocument = require('pdfkit');
+const ExcelJS = require('exceljs');
 const { getDb }  = require('../../database/mongo'); 
 
 
@@ -746,6 +748,126 @@ const getAllSales = async (req, res) => {
   }
 };
 
+const getReportsData = async (req, res) => {
+  try {
+    const db = await getDb();
+    const ventasCol = db.collection('ventas');
+
+    const { startDate, endDate, type, format } = req.query;
+
+    if (!startDate || !endDate || !type) {
+      return res.status(400).json({
+        status: 'Error',
+        message: 'Debe proporcionar startDate, endDate y type.'
+      });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    const query = {
+      fecha: {
+        $gte: start,
+        $lte: end
+      }
+    };
+
+    const ventas = await ventasCol.find(query).toArray();
+
+    let report = [];
+
+    if (type === 'ventas') {
+      report = ventas.map(v => ({
+        Código: v.code,
+        Cliente: v.cliente?.nombre || 'Sin cliente',
+        Total: v.totalVenta,
+        Método: v.metodoPago,
+        Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
+      }));
+    }
+
+    else if (type === 'total') {
+      const totalVentas = ventas.reduce((sum, v) => sum + v.totalVenta, 0);
+      report = [{ TotalVentas: totalVentas }];
+    }
+
+    else if (type === 'top') {
+      const productosVendidos = {};
+
+      ventas.forEach(v => {
+        v.productos.forEach(p => {
+          if (!productosVendidos[p.name]) {
+            productosVendidos[p.name] = 0;
+          }
+          productosVendidos[p.name] += p.cantidad;
+        });
+      });
+
+      report = Object.entries(productosVendidos)
+        .map(([name, cantidad]) => ({ Producto: name, Cantidad: cantidad }))
+        .sort((a, b) => b.Cantidad - a.Cantidad);
+    }
+
+    else {
+      return res.status(400).json({ message: 'Tipo de reporte no válido.' });
+    }
+
+    // 📄 Si el formato es PDF
+    if (format === 'pdf') {
+      const doc = new PDFDocument();
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename=report-${type}.pdf`);
+      doc.pipe(res);
+
+      doc.fontSize(18).text(`Reporte: ${type.toUpperCase()}`, { align: 'center' });
+      doc.moveDown();
+
+      report.forEach(row => {
+        Object.entries(row).forEach(([key, val]) => {
+          doc.fontSize(12).text(`${key}: ${val}`);
+        });
+        doc.moveDown();
+      });
+
+      doc.end();
+    }
+
+    // 📊 Si el formato es Excel
+    else if (format === 'excel') {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet(`Reporte-${type}`);
+
+      if (report.length > 0) {
+        worksheet.columns = Object.keys(report[0]).map(key => ({
+          header: key,
+          key: key,
+          width: 20
+        }));
+
+        worksheet.addRows(report);
+      }
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename=report-${type}.xlsx`);
+
+      await workbook.xlsx.write(res);
+      res.end();
+    }
+
+    // 🧾 Respuesta JSON normal
+    else {
+      res.status(200).json(report);
+    }
+
+  } catch (error) {
+    console.error('Error generando el reporte:', error);
+    res.status(500).json({
+      status: 'Error',
+      message: 'No se pudo generar el reporte.',
+      error: error.message
+    });
+  }
+};
 
 
 module.exports = {
@@ -765,7 +887,7 @@ module.exports = {
     checkAndReserveSaleCode,
     releaseSaleCode,
     getLastRegisteredSaleCode,
-    getAllSales
-    
+    getAllSales,
+    getReportsData
     
 };
