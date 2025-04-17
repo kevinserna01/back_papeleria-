@@ -754,66 +754,38 @@ const getReportsData = async (req, res) => {
     const db = await getDb();
     const ventasCol = db.collection('ventas');
 
-    const { startDate, endDate, type, format } = req.query;
+    const { startDate, endDate, type, format, date } = req.query;
 
-    if (!startDate || !endDate) {
+    if (!type) {
       return res.status(400).json({
         status: 'Error',
-        message: 'Debe proporcionar startDate y endDate.'
+        message: 'El parámetro "type" es obligatorio.'
       });
     }
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    // 📆 Si viene un día específico (consulta por día)
+    let query = {};
+    if (date) {
+      const target = new Date(date);
+      const nextDay = new Date(target);
+      nextDay.setDate(nextDay.getDate() + 1);
+      query.fecha = { $gte: target, $lt: nextDay };
+    }
 
-    const query = {
-      fecha: {
-        $gte: start,
-        $lte: end
-      }
-    };
-
-    const ventas = await ventasCol.find(query).toArray();
-
-    const buildVentas = () => ventas.map(v => ({
-      Código: v.code,
-      Cliente: v.cliente?.nombre || 'Sin cliente',
-      Total: v.totalVenta,
-      Método: v.metodoPago,
-      Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
-    }));
-
-    const buildTotal = () => {
-      return [{ TotalVentas: ventas.reduce((sum, v) => sum + v.totalVenta, 0) }];
-    };
-
-    const buildTop = () => {
-      const productosVendidos = {};
-      ventas.forEach(v => {
-        v.productos.forEach(p => {
-          productosVendidos[p.name] = (productosVendidos[p.name] || 0) + p.cantidad;
-        });
-      });
-
-      return Object.entries(productosVendidos)
-        .map(([name, cantidad]) => ({ Producto: name, Cantidad: cantidad }))
-        .sort((a, b) => b.Cantidad - a.Cantidad);
-    };
-
-    // Si no se especifica un type, devolver todos los reportes
-    if (!type) {
-      return res.status(200).json({
-        status: 'Success',
-        message: 'Reporte completo generado.',
-        data: {
-          ventas: buildVentas(),
-          total: buildTotal(),
-          top: buildTop()
-        }
+    // 📅 Si viene un rango de fechas
+    else if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setDate(end.getDate() + 1); // para incluir todo el día final
+      query.fecha = { $gte: start, $lt: end };
+    } else {
+      return res.status(400).json({
+        status: 'Error',
+        message: 'Debe proporcionar startDate y endDate o un date específico.'
       });
     }
 
-    // Si hay type, validar
+    // Validar tipo
     if (!['ventas', 'total', 'top'].includes(type)) {
       return res.status(400).json({
         status: 'Error',
@@ -821,33 +793,52 @@ const getReportsData = async (req, res) => {
       });
     }
 
+    const ventas = await ventasCol.find(query).toArray();
     let report = [];
-    if (type === 'ventas') report = buildVentas();
-    if (type === 'total') report = buildTotal();
-    if (type === 'top') report = buildTop();
 
-    // Si formato es PDF o Excel, generar archivo
+    if (type === 'ventas') {
+      report = ventas.map(v => ({
+        Código: v.code,
+        Cliente: v.cliente?.nombre || 'Sin cliente',
+        Total: v.totalVenta,
+        Método: v.metodoPago,
+        Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
+      }));
+    } else if (type === 'total') {
+      const totalVentas = ventas.reduce((sum, v) => sum + v.totalVenta, 0);
+      report = [{ TotalVentas: totalVentas }];
+    } else if (type === 'top') {
+      const productosVendidos = {};
+      ventas.forEach(v => {
+        v.productos.forEach(p => {
+          if (!productosVendidos[p.name]) {
+            productosVendidos[p.name] = 0;
+          }
+          productosVendidos[p.name] += p.cantidad;
+        });
+      });
+      report = Object.entries(productosVendidos)
+        .map(([name, cantidad]) => ({ Producto: name, Cantidad: cantidad }))
+        .sort((a, b) => b.Cantidad - a.Cantidad);
+    }
+
+    // Formatos: PDF, Excel, o JSON
     if (format === 'pdf') {
       const doc = new PDFDocument();
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename=report-${type}.pdf`);
       doc.pipe(res);
-
-      doc.fontSize(18).text(`Reporte: ${type.toUpperCase()}`, { align: 'center' });
-      doc.moveDown();
-
+      doc.fontSize(18).text(`Reporte: ${type.toUpperCase()}`, { align: 'center' }).moveDown();
       report.forEach(row => {
         Object.entries(row).forEach(([key, val]) => {
           doc.fontSize(12).text(`${key}: ${val}`);
         });
         doc.moveDown();
       });
-
       doc.end();
     } else if (format === 'excel') {
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet(`Reporte-${type}`);
-
       if (report.length > 0) {
         worksheet.columns = Object.keys(report[0]).map(key => ({
           header: key,
@@ -856,7 +847,6 @@ const getReportsData = async (req, res) => {
         }));
         worksheet.addRows(report);
       }
-
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename=report-${type}.xlsx`);
       await workbook.xlsx.write(res);
@@ -874,6 +864,7 @@ const getReportsData = async (req, res) => {
     });
   }
 };
+
 
 
 // Middleware para verificar el token
