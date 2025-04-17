@@ -914,19 +914,20 @@ const getSpecificDayReport = async (req, res) => {
   try {
     const db = await getDb();
     const ventasCol = db.collection('ventas');
+    const productosCol = db.collection('productos');
 
     const dateParam = req.query.startDate || req.query.date;
-
     if (!dateParam) {
       return res.status(400).json({
         status: 'Error',
-        message: 'Debe proporcionar una fecha específica (startDate).'
+        message: 'Debe proporcionar una fecha específica (startDate o date).'
       });
     }
 
     const dayStart = new Date(dateParam);
+    dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(dateParam);
-    dayEnd.setHours(23, 59, 59, 999); // Fin del mismo día
+    dayEnd.setHours(23, 59, 59, 999);
 
     const query = {
       fecha: {
@@ -937,13 +938,45 @@ const getSpecificDayReport = async (req, res) => {
 
     const ventas = await ventasCol.find(query).toArray();
 
-    const resumen = ventas.map(v => ({
-      Código: v.code,
-      Cliente: v.cliente?.nombre || 'Sin cliente',
-      Total: v.totalVenta,
-      Método: v.metodoPago,
-      Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
-    }));
+    let totalVentas = 0;
+    let ventasPorCategoria = {};
+    let detalles = [];
+
+    for (const v of ventas) {
+      totalVentas += v.totalVenta;
+
+      const detalleVenta = {
+        Código: v.code,
+        Cliente: v.cliente?.nombre || 'Sin cliente',
+        Total: v.totalVenta,
+        Método: v.metodoPago,
+        Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss'),
+        Productos: []
+      };
+
+      for (const p of v.productos) {
+        const prod = await productosCol.findOne({ name: p.name });
+        const categoria = prod?.categoria || 'Sin categoría';
+        ventasPorCategoria[categoria] = (ventasPorCategoria[categoria] || 0) + p.cantidad;
+
+        detalleVenta.Productos.push({
+          Nombre: p.name,
+          Cantidad: p.cantidad,
+          Precio: p.precioUnitario,
+          Categoría: categoria
+        });
+      }
+
+      detalles.push(detalleVenta);
+    }
+
+    const resumen = {
+      Fecha: dateParam,
+      TotalVentas: totalVentas,
+      NumeroVentas: ventas.length,
+      VentasPorCategoria: ventasPorCategoria,
+      Detalles: detalles
+    };
 
     res.status(200).json({
       status: 'Success',
@@ -960,6 +993,7 @@ const getSpecificDayReport = async (req, res) => {
     });
   }
 };
+
 
 
 
