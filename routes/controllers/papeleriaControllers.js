@@ -924,11 +924,8 @@ const getSpecificDayReport = async (req, res) => {
         message: 'Debe proporcionar una fecha específica (startDate o date).'
       });
     }
-
-    const dayStart = new Date(dateParam);
-    const dayEnd = new Date(dateParam);
-    dayEnd.setHours(23, 59, 59, 999); // Fin del mismo día
-
+    const dayStart = moment.tz(dateParam, 'America/Bogota').startOf('day').toDate();
+    const dayEnd = moment.tz(dateParam, 'America/Bogota').endOf('day').toDate();
     const query = {
       fecha: {
         $gte: dayStart,
