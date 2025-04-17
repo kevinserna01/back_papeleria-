@@ -885,6 +885,41 @@ const verifyToken = (req, res, next) => {
   });
 };
 
+const registeradmin = async (req, res) => {
+  const { correo, contraseña } = req.body;
+
+  if (!correo || !contraseña) {
+    return res.status(400).json({ status: "Error", message: "Correo y contraseña son obligatorios" });
+  }
+
+  const hashedPassword = CryptoJS.SHA256(contraseña, process.env.CODE_SECRET_DATA).toString();
+
+  try {
+    await connectDb();
+    const db = getDb();
+
+    const existingAdmin = await db.collection('administradores').findOne({ correo });
+    if (existingAdmin) {
+      return res.status(400).json({ status: "Error", message: "El correo ya está en uso" });
+    }
+
+    const newAdmin = {
+      correo,
+      password: hashedPassword,
+      role: 'admin',
+      creado: moment().tz("America/Bogota").format('YYYY-MM-DD HH:mm:ss'),
+    };
+
+    await db.collection('administradores').insertOne(newAdmin);
+
+    res.status(201).json({ status: "Éxito", message: "Administrador creado correctamente" });
+  } catch (error) {
+    console.error('Error al registrar el admin:', error);
+    res.status(500).json({ status: "Error", message: "Internal Server Error" });
+  }
+};
+
+
 
 module.exports = {
     registertrabajador,
@@ -905,6 +940,7 @@ module.exports = {
     getLastRegisteredSaleCode,
     getAllSales,
     getReportsData,
-    verifyToken
+    verifyToken,
+    registeradmin
     
 };
