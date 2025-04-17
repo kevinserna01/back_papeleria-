@@ -910,6 +910,8 @@ const getReportsData = async (req, res) => {
     });
   }
 };
+const moment = require('moment-timezone');
+
 const getSpecificDayReport = async (req, res) => {
   try {
     const db = await getDb();
@@ -920,13 +922,13 @@ const getSpecificDayReport = async (req, res) => {
     if (!dateParam) {
       return res.status(400).json({
         status: 'Error',
-        message: 'Debe proporcionar una fecha específica (startDate).'
+        message: 'Debe proporcionar una fecha específica (startDate o date).'
       });
     }
 
-    const dayStart = new Date(dateParam);
-    const dayEnd = new Date(dateParam);
-    dayEnd.setHours(23, 59, 59, 999);
+    // Crear rango de día en zona horaria de Colombia
+    const dayStart = moment.tz(dateParam, 'America/Bogota').startOf('day').toDate();
+    const dayEnd = moment.tz(dateParam, 'America/Bogota').endOf('day').toDate();
 
     const query = {
       fecha: { $gte: dayStart, $lte: dayEnd }
@@ -1010,6 +1012,7 @@ const getSpecificDayReport = async (req, res) => {
     });
   }
 };
+
 
 
 
