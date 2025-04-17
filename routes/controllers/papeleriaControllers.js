@@ -754,40 +754,17 @@ const getReportsData = async (req, res) => {
     const db = await getDb();
     const ventasCol = db.collection('ventas');
 
-    // ✅ Acepta tanto GET como POST
-    const source = req.method === 'GET' ? req.query : req.body;
-    const { startDate, endDate, type, format } = source;
+    const { startDate, endDate, type, format } = req.query;
 
-    if (!startDate || !endDate || !type) {
+    if (!startDate || !endDate) {
       return res.status(400).json({
         status: 'Error',
-        message: 'Debe proporcionar startDate, endDate y type.'
-      });
-    }
-
-    if (!['ventas', 'total', 'top'].includes(type)) {
-      return res.status(400).json({
-        status: 'Error',
-        message: 'El parámetro "type" debe ser uno de: ventas, total, top.'
+        message: 'Debe proporcionar startDate y endDate.'
       });
     }
 
     const start = new Date(startDate);
     const end = new Date(endDate);
-
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-      return res.status(400).json({
-        status: 'Error',
-        message: 'Las fechas proporcionadas no son válidas. Usa formato YYYY-MM-DD.'
-      });
-    }
-
-    if (start > end) {
-      return res.status(400).json({
-        status: 'Error',
-        message: 'La fecha de inicio no puede ser posterior a la fecha de fin.'
-      });
-    }
 
     const query = {
       fecha: {
@@ -798,24 +775,19 @@ const getReportsData = async (req, res) => {
 
     const ventas = await ventasCol.find(query).toArray();
 
-    let report = [];
+    const buildVentas = () => ventas.map(v => ({
+      Código: v.code,
+      Cliente: v.cliente?.nombre || 'Sin cliente',
+      Total: v.totalVenta,
+      Método: v.metodoPago,
+      Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
+    }));
 
-    if (type === 'ventas') {
-      report = ventas.map(v => ({
-        Código: v.code,
-        Cliente: v.cliente?.nombre || 'Sin cliente',
-        Total: v.totalVenta,
-        Método: v.metodoPago,
-        Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
-      }));
-    }
+    const buildTotal = () => {
+      return [{ TotalVentas: ventas.reduce((sum, v) => sum + v.totalVenta, 0) }];
+    };
 
-    else if (type === 'total') {
-      const totalVentas = ventas.reduce((sum, v) => sum + v.totalVenta, 0);
-      report = [{ TotalVentas: totalVentas }];
-    }
-
-    else if (type === 'top') {
+    const buildTop = () => {
       const productosVendidos = {};
       ventas.forEach(v => {
         v.productos.forEach(p => {
@@ -823,12 +795,38 @@ const getReportsData = async (req, res) => {
         });
       });
 
-      report = Object.entries(productosVendidos)
+      return Object.entries(productosVendidos)
         .map(([name, cantidad]) => ({ Producto: name, Cantidad: cantidad }))
         .sort((a, b) => b.Cantidad - a.Cantidad);
+    };
+
+    // Si no se especifica un type, devolver todos los reportes
+    if (!type) {
+      return res.status(200).json({
+        status: 'Success',
+        message: 'Reporte completo generado.',
+        data: {
+          ventas: buildVentas(),
+          total: buildTotal(),
+          top: buildTop()
+        }
+      });
     }
 
-    // 📄 PDF
+    // Si hay type, validar
+    if (!['ventas', 'total', 'top'].includes(type)) {
+      return res.status(400).json({
+        status: 'Error',
+        message: 'El parámetro "type" debe ser uno de: ventas, total, top.'
+      });
+    }
+
+    let report = [];
+    if (type === 'ventas') report = buildVentas();
+    if (type === 'total') report = buildTotal();
+    if (type === 'top') report = buildTop();
+
+    // Si formato es PDF o Excel, generar archivo
     if (format === 'pdf') {
       const doc = new PDFDocument();
       res.setHeader('Content-Type', 'application/pdf');
@@ -846,10 +844,7 @@ const getReportsData = async (req, res) => {
       });
 
       doc.end();
-    }
-
-    // 📊 Excel
-    else if (format === 'excel') {
+    } else if (format === 'excel') {
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet(`Reporte-${type}`);
 
@@ -859,19 +854,14 @@ const getReportsData = async (req, res) => {
           key: key,
           width: 20
         }));
-
         worksheet.addRows(report);
       }
 
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename=report-${type}.xlsx`);
-
       await workbook.xlsx.write(res);
       res.end();
-    }
-
-    // 🧾 JSON simple
-    else {
+    } else {
       res.status(200).json(report);
     }
 
@@ -885,20 +875,6 @@ const getReportsData = async (req, res) => {
   }
 };
 
-// Middleware para verificar el token
-const verifyToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) return res.status(401).json({ message: 'Token no proporcionado' });
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ message: 'Token inválido o expirado' });
-
-    req.user = user;
-    next();
-  });
-};
 
 const registeradmin = async (req, res) => {
   try {
