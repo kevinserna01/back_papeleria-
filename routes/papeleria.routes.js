@@ -36,7 +36,7 @@ mongoose.connect(process.env.MONGO_URI)
    router.get('/reportsapi', verifyToken, getReportsData);
    router.post('/registeradminapi', registeradmin);
    router.post('/loginadminapi', loginadmin);
-   router.get('/reportsapi/day', getSpecificDayReport);
+   router.get('/reportsapi/day', getDailyReportData);
 
 
 
