@@ -920,79 +920,83 @@ const getSpecificDayReport = async (req, res) => {
     if (!dateParam) {
       return res.status(400).json({
         status: 'Error',
-        message: 'Debe proporcionar una fecha específica (startDate o date).'
+        message: 'Debe proporcionar una fecha específica (startDate).'
       });
     }
 
     const dayStart = new Date(dateParam);
-    dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(dateParam);
     dayEnd.setHours(23, 59, 59, 999);
 
     const query = {
-      fecha: {
-        $gte: dayStart,
-        $lte: dayEnd
-      }
+      fecha: { $gte: dayStart, $lte: dayEnd }
     };
 
     const ventas = await ventasCol.find(query).toArray();
 
-    const ventasList = [];
-    const productosVendidos = {};
-    const categoriasResumen = {};
-    let totalVentas = 0;
+    // Ventas detalladas
+    const buildVentas = () => ventas.map(v => ({
+      Código: v.code,
+      Cliente: v.cliente?.nombre || 'Sin cliente',
+      Total: v.totalVenta,
+      Método: v.metodoPago,
+      Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
+    }));
 
-    for (const v of ventas) {
-      totalVentas += v.totalVenta;
+    // Total de ventas
+    const buildTotal = () => {
+      const total = ventas.reduce((sum, v) => sum + v.totalVenta, 0);
+      return [{ TotalVentas: total }];
+    };
 
-      ventasList.push({
-        Código: v.code,
-        Cliente: v.cliente?.nombre || 'Sin cliente',
-        Total: v.totalVenta,
-        Método: v.metodoPago,
-        Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
+    // Top productos
+    const buildTop = () => {
+      const productosVendidos = {};
+      ventas.forEach(v => {
+        v.productos.forEach(p => {
+          productosVendidos[p.name] = (productosVendidos[p.name] || 0) + p.cantidad;
+        });
       });
 
-      for (const p of v.productos) {
-        const productoDB = await productosCol.findOne({ name: p.name });
-        const categoria = productoDB?.categoria || 'Sin categoría';
+      return Object.entries(productosVendidos)
+        .map(([name, cantidad]) => ({ Producto: name, Cantidad: cantidad }))
+        .sort((a, b) => b.Cantidad - a.Cantidad);
+    };
 
-        // Acumular por producto
-        productosVendidos[p.name] = (productosVendidos[p.name] || 0) + p.cantidad;
+    // Categorías
+    const buildCategorias = async () => {
+      const resumenPorCategoria = {};
 
-        // Acumular por categoría
-        if (!categoriasResumen[categoria]) {
-          categoriasResumen[categoria] = {
-            CantidadVendida: 0,
-            TotalGenerado: 0
-          };
+      for (const venta of ventas) {
+        for (const producto of venta.productos) {
+          const pInfo = await productosCol.findOne({ name: producto.name });
+          const categoria = pInfo?.categoria || 'Sin categoría';
+
+          if (!resumenPorCategoria[categoria]) {
+            resumenPorCategoria[categoria] = {
+              Categoria: categoria,
+              CantidadVendida: 0,
+              TotalGenerado: 0
+            };
+          }
+
+          resumenPorCategoria[categoria].CantidadVendida += producto.cantidad;
+          resumenPorCategoria[categoria].TotalGenerado += producto.precio * producto.cantidad;
         }
-
-        categoriasResumen[categoria].CantidadVendida += p.cantidad;
-        categoriasResumen[categoria].TotalGenerado += p.cantidad * p.precioUnitario;
       }
-    }
 
-    const top = Object.entries(productosVendidos)
-      .map(([Producto, Cantidad]) => ({ Producto, Cantidad }))
-      .sort((a, b) => b.Cantidad - a.Cantidad);
+      return Object.values(resumenPorCategoria);
+    };
 
-    const categorias = Object.entries(categoriasResumen).map(
-      ([Categoria, { CantidadVendida, TotalGenerado }]) => ({
-        Categoria,
-        CantidadVendida,
-        TotalGenerado
-      })
-    );
+    const categorias = await buildCategorias();
 
-    return res.status(200).json({
+    res.status(200).json({
       status: 'Success',
       message: 'Reporte completo generado.',
       data: {
-        ventas: ventasList,
-        total: [{ TotalVentas: totalVentas }],
-        top,
+        ventas: buildVentas(),
+        total: buildTotal(),
+        top: buildTop(),
         categorias
       }
     });
