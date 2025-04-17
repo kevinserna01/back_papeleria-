@@ -2,7 +2,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 const router = express.Router();
 const mongoose = require('mongoose');
-const { registertrabajador, loginTrabajador,logoutTrabajador,newProduct,getProducts,updateProduct,deleteProduct,assignProductToInventory,getInventoryProducts,updateInventoryProduct,deleteInventoryProduct,getProductsWithStock,createSale,checkAndReserveSaleCode,releaseSaleCode,getLastRegisteredSaleCode,getAllSales,getReportsData,verifyToken,registeradmin,loginadmin} =require('./controllers/papeleriaControllers');
+const { registertrabajador, loginTrabajador,logoutTrabajador,newProduct,getProducts,updateProduct,deleteProduct,assignProductToInventory,getInventoryProducts,updateInventoryProduct,deleteInventoryProduct,getProductsWithStock,createSale,checkAndReserveSaleCode,releaseSaleCode,getLastRegisteredSaleCode,getAllSales,getReportsData,verifyToken,registeradmin,loginadmin,getSpecificDayReport} =require('./controllers/papeleriaControllers');
 
 dotenv.config({ path: './config.env' });
 
@@ -36,6 +36,8 @@ mongoose.connect(process.env.MONGO_URI)
    router.get('/reportsapi', verifyToken, getReportsData);
    router.post('/registeradminapi', registeradmin);
    router.post('/loginadminapi', loginadmin);
+   router.get('/reportsapi/day', getSpecificDayReport);
+
 
 
   
