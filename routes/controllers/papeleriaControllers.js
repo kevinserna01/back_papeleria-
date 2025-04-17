@@ -938,50 +938,63 @@ const getSpecificDayReport = async (req, res) => {
 
     const ventas = await ventasCol.find(query).toArray();
 
+    const ventasList = [];
+    const productosVendidos = {};
+    const categoriasResumen = {};
     let totalVentas = 0;
-    let ventasPorCategoria = {};
-    let detalles = [];
 
     for (const v of ventas) {
       totalVentas += v.totalVenta;
 
-      const detalleVenta = {
+      ventasList.push({
         Código: v.code,
         Cliente: v.cliente?.nombre || 'Sin cliente',
         Total: v.totalVenta,
         Método: v.metodoPago,
-        Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss'),
-        Productos: []
-      };
+        Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
+      });
 
       for (const p of v.productos) {
-        const prod = await productosCol.findOne({ name: p.name });
-        const categoria = prod?.categoria || 'Sin categoría';
-        ventasPorCategoria[categoria] = (ventasPorCategoria[categoria] || 0) + p.cantidad;
+        const productoDB = await productosCol.findOne({ name: p.name });
+        const categoria = productoDB?.categoria || 'Sin categoría';
 
-        detalleVenta.Productos.push({
-          Nombre: p.name,
-          Cantidad: p.cantidad,
-          Precio: p.precioUnitario,
-          Categoría: categoria
-        });
+        // Acumular por producto
+        productosVendidos[p.name] = (productosVendidos[p.name] || 0) + p.cantidad;
+
+        // Acumular por categoría
+        if (!categoriasResumen[categoria]) {
+          categoriasResumen[categoria] = {
+            CantidadVendida: 0,
+            TotalGenerado: 0
+          };
+        }
+
+        categoriasResumen[categoria].CantidadVendida += p.cantidad;
+        categoriasResumen[categoria].TotalGenerado += p.cantidad * p.precioUnitario;
       }
-
-      detalles.push(detalleVenta);
     }
 
-    const resumen = {
-      Fecha: dateParam,
-      TotalVentas: totalVentas,
-      NumeroVentas: ventas.length,
-      VentasPorCategoria: ventasPorCategoria,
-      Detalles: detalles
-    };
+    const top = Object.entries(productosVendidos)
+      .map(([Producto, Cantidad]) => ({ Producto, Cantidad }))
+      .sort((a, b) => b.Cantidad - a.Cantidad);
 
-    res.status(200).json({
+    const categorias = Object.entries(categoriasResumen).map(
+      ([Categoria, { CantidadVendida, TotalGenerado }]) => ({
+        Categoria,
+        CantidadVendida,
+        TotalGenerado
+      })
+    );
+
+    return res.status(200).json({
       status: 'Success',
-      message: 'Reporte del día generado.',
-      data: resumen
+      message: 'Reporte completo generado.',
+      data: {
+        ventas: ventasList,
+        total: [{ TotalVentas: totalVentas }],
+        top,
+        categorias
+      }
     });
 
   } catch (error) {
@@ -993,7 +1006,6 @@ const getSpecificDayReport = async (req, res) => {
     });
   }
 };
-
 
 
 
