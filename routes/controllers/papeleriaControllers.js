@@ -753,7 +753,6 @@ const getReportsData = async (req, res) => {
   try {
     const db = await getDb();
     const ventasCol = db.collection('ventas');
-    const productosCol = db.collection('productos');
 
     const { startDate, endDate, type, format } = req.query;
 
@@ -764,34 +763,27 @@ const getReportsData = async (req, res) => {
       });
     }
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const start = moment.tz(startDate, 'America/Bogota').startOf('day').toDate();
+    const end = moment.tz(endDate, 'America/Bogota').endOf('day').toDate();
 
     const query = {
-      fecha: {
-        $gte: start,
-        $lte: end
-      }
+      fecha: { $gte: start, $lte: end }
     };
 
     const ventas = await ventasCol.find(query).toArray();
-    const productos = await productosCol.find().toArray();
 
-    const mapaCategorias = {};
-    productos.forEach(p => {
-      mapaCategorias[p._id.toString()] = p.categoria || 'Sin categoría';
-    });
-
-    const buildVentas = () => ventas.map(v => ({
-      Código: v.code,
-      Cliente: v.cliente?.nombre || 'Sin cliente',
-      Total: v.totalVenta,
-      Método: v.metodoPago,
-      Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
-    }));
+    const buildVentas = () =>
+      ventas.map(v => ({
+        Código: v.code,
+        Cliente: v.cliente?.nombre || 'Sin cliente',
+        Total: v.totalVenta,
+        Método: v.metodoPago,
+        Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD hh:mm:ss A')
+      }));
 
     const buildTotal = () => {
-      return [{ TotalVentas: ventas.reduce((sum, v) => sum + v.totalVenta, 0) }];
+      const totalVentas = ventas.reduce((sum, v) => sum + v.totalVenta, 0);
+      return [{ TotalVentas: totalVentas }];
     };
 
     const buildTop = () => {
@@ -812,29 +804,27 @@ const getReportsData = async (req, res) => {
 
       ventas.forEach(v => {
         v.productos.forEach(p => {
-          const id = p._id?.toString() || p.productoId?.toString();
-          const cat = mapaCategorias[id] || 'Sin categoría';
+          const categoria = p.categoria || 'Sin categoría';
 
-          if (!categorias[cat]) {
-            categorias[cat] = {
+          if (!categorias[categoria]) {
+            categorias[categoria] = {
               cantidad: 0,
               total: 0
             };
           }
 
-          categorias[cat].cantidad += p.cantidad;
-          categorias[cat].total += (p.precio * p.cantidad);
+          categorias[categoria].cantidad += p.cantidad;
+          categorias[categoria].total += p.precioUnitario * p.cantidad;
         });
       });
 
       return Object.entries(categorias).map(([cat, data]) => ({
         Categoria: cat,
         CantidadVendida: data.cantidad,
-        TotalGenerado: data.total
+        TotalGenerado: data.total || null
       }));
     };
 
-    // Validación de tipos permitidos
     const tiposValidos = ['ventas', 'total', 'top', 'categorias'];
 
     if (!type) {
