@@ -910,114 +910,57 @@ const getReportsData = async (req, res) => {
     });
   }
 };
-const getDailyReportData = async (req, res) => {
+const getSpecificDayReport = async (req, res) => {
   try {
     const db = await getDb();
     const ventasCol = db.collection('ventas');
-    const productosCol = db.collection('productos');
 
     const dateParam = req.query.startDate || req.query.date;
-    const format = req.query.format; // puede ser "pdf", "excel" o undefined
 
     if (!dateParam) {
       return res.status(400).json({
         status: 'Error',
-        message: 'Debe proporcionar una fecha usando "startDate" o "date".'
+        message: 'Debe proporcionar una fecha específica (startDate).'
       });
     }
 
-    const date = new Date(dateParam);
-    const startOfDay = new Date(date.setHours(0, 0, 0, 0));
-    const endOfDay = new Date(date.setHours(23, 59, 59, 999));
+    const dayStart = new Date(dateParam);
+    const dayEnd = new Date(dateParam);
+    dayEnd.setHours(23, 59, 59, 999); // Fin del mismo día
 
     const query = {
       fecha: {
-        $gte: startOfDay,
-        $lte: endOfDay
+        $gte: dayStart,
+        $lte: dayEnd
       }
     };
 
     const ventas = await ventasCol.find(query).toArray();
 
-    const totalVentas = ventas.reduce((sum, v) => sum + v.totalVenta, 0);
+    const resumen = ventas.map(v => ({
+      Código: v.code,
+      Cliente: v.cliente?.nombre || 'Sin cliente',
+      Total: v.totalVenta,
+      Método: v.metodoPago,
+      Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
+    }));
 
-    const categoriasTotales = {};
-    for (const venta of ventas) {
-      for (const p of venta.productos) {
-        const prod = await productosCol.findOne({ name: p.name });
-        const categoria = prod?.categoria || 'Sin categoría';
-        categoriasTotales[categoria] = (categoriasTotales[categoria] || 0) + p.cantidad;
-      }
-    }
-
-    const reportData = {
-      Fecha: dateParam,
-      TotalVentas: totalVentas,
-      VentasRealizadas: ventas.length,
-      Categorías: categoriasTotales
-    };
-
-    // Exportar PDF
-    if (format === 'pdf') {
-      const doc = new PDFDocument();
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename=report-day-${dateParam}.pdf`);
-      doc.pipe(res);
-
-      doc.fontSize(18).text(`Reporte Diario - ${dateParam}`, { align: 'center' });
-      doc.moveDown();
-
-      doc.fontSize(14).text(`Total Ventas: $${totalVentas.toFixed(2)}`);
-      doc.text(`Número de Ventas: ${ventas.length}`);
-      doc.moveDown();
-
-      doc.fontSize(16).text('Productos por Categoría:', { underline: true });
-      for (const [cat, cantidad] of Object.entries(categoriasTotales)) {
-        doc.fontSize(12).text(`${cat}: ${cantidad}`);
-      }
-
-      doc.end();
-      return;
-    }
-
-    // Exportar Excel
-    if (format === 'excel') {
-      const workbook = new ExcelJS.Workbook();
-      const worksheet = workbook.addWorksheet(`Reporte ${dateParam}`);
-
-      worksheet.addRow(['Fecha', dateParam]);
-      worksheet.addRow(['Total Ventas', totalVentas]);
-      worksheet.addRow(['Ventas Realizadas', ventas.length]);
-      worksheet.addRow([]);
-
-      worksheet.addRow(['Categoría', 'Cantidad']);
-      for (const [cat, cantidad] of Object.entries(categoriasTotales)) {
-        worksheet.addRow([cat, cantidad]);
-      }
-
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename=report-day-${dateParam}.xlsx`);
-      await workbook.xlsx.write(res);
-      res.end();
-      return;
-    }
-
-    // JSON por defecto
     res.status(200).json({
       status: 'Success',
-      message: 'Reporte diario generado correctamente.',
-      data: reportData
+      message: 'Reporte del día generado.',
+      data: resumen
     });
 
   } catch (error) {
-    console.error('Error en el reporte diario:', error);
+    console.error('Error generando el reporte del día:', error);
     res.status(500).json({
       status: 'Error',
-      message: 'No se pudo generar el reporte diario.',
+      message: 'No se pudo generar el reporte del día.',
       error: error.message
     });
   }
 };
+
 
 
 
@@ -1160,6 +1103,6 @@ module.exports = {
     verifyToken,
     registeradmin,
     loginadmin,
-    getDailyReportData
+    getSpecificDayReport
     
 };
