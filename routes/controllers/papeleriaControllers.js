@@ -886,36 +886,50 @@ const verifyToken = (req, res, next) => {
 };
 
 const registeradmin = async (req, res) => {
-  const { correo, contraseña } = req.body;
-
-  if (!correo || !contraseña) {
-    return res.status(400).json({ status: "Error", message: "Correo y contraseña son obligatorios" });
-  }
-
-  const hashedPassword = CryptoJS.SHA256(contraseña, process.env.CODE_SECRET_DATA).toString();
-
   try {
-    await connectDb();
-    const db = getDb();
+    const db = await getDb();
+
+    const { correo, contraseña } = req.body;
+
+    if (!correo || !contraseña) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Correo y contraseña son obligatorios."
+      });
+    }
 
     const existingAdmin = await db.collection('administradores').findOne({ correo });
     if (existingAdmin) {
-      return res.status(400).json({ status: "Error", message: "El correo ya está en uso" });
+      return res.status(409).json({
+        status: "Error",
+        message: "Ya existe un administrador con ese correo."
+      });
     }
+
+    const hashedPassword = CryptoJS.SHA256(contraseña, process.env.CODE_SECRET_DATA).toString();
 
     const newAdmin = {
       correo,
       password: hashedPassword,
       role: 'admin',
-      creado: moment().tz("America/Bogota").format('YYYY-MM-DD HH:mm:ss'),
+      creado: moment().tz("America/Bogota").format('YYYY-MM-DD HH:mm:ss')
     };
 
     await db.collection('administradores').insertOne(newAdmin);
 
-    res.status(201).json({ status: "Éxito", message: "Administrador creado correctamente" });
+    return res.status(201).json({
+      status: "Success",
+      message: "Administrador creado correctamente.",
+      data: newAdmin
+    });
+
   } catch (error) {
-    console.error('Error al registrar el admin:', error);
-    res.status(500).json({ status: "Error", message: "Internal Server Error" });
+    console.error('Error al registrar administrador:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno del servidor",
+      error: error.message
+    });
   }
 };
 const loginadmin = async (req, res) => {
