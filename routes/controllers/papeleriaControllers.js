@@ -910,7 +910,6 @@ const getReportsData = async (req, res) => {
     });
   }
 };
-const moment = require('moment-timezone');
 
 const getSpecificDayReport = async (req, res) => {
   try {
