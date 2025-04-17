@@ -915,9 +915,9 @@ const getSpecificDayReport = async (req, res) => {
   try {
     const db = await getDb();
     const ventasCol = db.collection('ventas');
-    const productosCol = db.collection('productos');
 
     const dateParam = req.query.startDate || req.query.date;
+
     if (!dateParam) {
       return res.status(400).json({
         status: 'Error',
@@ -925,18 +925,21 @@ const getSpecificDayReport = async (req, res) => {
       });
     }
 
-    // Crear rango de día en zona horaria de Colombia
-    const dayStart = moment.tz(dateParam, 'America/Bogota').startOf('day').toDate();
-    const dayEnd = moment.tz(dateParam, 'America/Bogota').endOf('day').toDate();
+    const dayStart = new Date(dateParam);
+    const dayEnd = new Date(dateParam);
+    dayEnd.setHours(23, 59, 59, 999); // Fin del mismo día
 
     const query = {
-      fecha: { $gte: dayStart, $lte: dayEnd }
+      fecha: {
+        $gte: dayStart,
+        $lte: dayEnd
+      }
     };
 
     const ventas = await ventasCol.find(query).toArray();
 
-    // Ventas detalladas
-    const buildVentas = () => ventas.map(v => ({
+    // 🧾 Ventas detalladas
+    const resumen = ventas.map(v => ({
       Código: v.code,
       Cliente: v.cliente?.nombre || 'Sin cliente',
       Total: v.totalVenta,
@@ -944,60 +947,53 @@ const getSpecificDayReport = async (req, res) => {
       Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
     }));
 
-    // Total de ventas
-    const buildTotal = () => {
-      const total = ventas.reduce((sum, v) => sum + v.totalVenta, 0);
-      return [{ TotalVentas: total }];
-    };
-
-    // Top productos
-    const buildTop = () => {
-      const productosVendidos = {};
-      ventas.forEach(v => {
-        v.productos.forEach(p => {
-          productosVendidos[p.name] = (productosVendidos[p.name] || 0) + p.cantidad;
-        });
-      });
-
-      return Object.entries(productosVendidos)
-        .map(([name, cantidad]) => ({ Producto: name, Cantidad: cantidad }))
-        .sort((a, b) => b.Cantidad - a.Cantidad);
-    };
-
-    // Categorías
-    const buildCategorias = async () => {
-      const resumenPorCategoria = {};
-
-      for (const venta of ventas) {
-        for (const producto of venta.productos) {
-          const pInfo = await productosCol.findOne({ name: producto.name });
-          const categoria = pInfo?.categoria || 'Sin categoría';
-
-          if (!resumenPorCategoria[categoria]) {
-            resumenPorCategoria[categoria] = {
-              Categoria: categoria,
-              CantidadVendida: 0,
-              TotalGenerado: 0
-            };
-          }
-
-          resumenPorCategoria[categoria].CantidadVendida += producto.cantidad;
-          resumenPorCategoria[categoria].TotalGenerado += producto.precio * producto.cantidad;
-        }
+    // 💰 Total de ventas
+    const total = [
+      {
+        TotalVentas: ventas.reduce((sum, v) => sum + v.totalVenta, 0)
       }
+    ];
 
-      return Object.values(resumenPorCategoria);
-    };
+    // 🔝 Productos top vendidos
+    const productosVendidos = {};
+    ventas.forEach(v => {
+      v.productos?.forEach(p => {
+        productosVendidos[p.name] = (productosVendidos[p.name] || 0) + p.cantidad;
+      });
+    });
 
-    const categorias = await buildCategorias();
+    const top = Object.entries(productosVendidos)
+      .map(([name, cantidad]) => ({ Producto: name, Cantidad: cantidad }))
+      .sort((a, b) => b.Cantidad - a.Cantidad);
 
+    // 📊 Categorías
+    const categoriasMap = {};
+
+    ventas.forEach(v => {
+      v.productos?.forEach(p => {
+        const cat = p.categoria || 'Sin categoría';
+        if (!categoriasMap[cat]) {
+          categoriasMap[cat] = {
+            Categoria: cat,
+            CantidadVendida: 0,
+            TotalGenerado: 0
+          };
+        }
+        categoriasMap[cat].CantidadVendida += p.cantidad;
+        categoriasMap[cat].TotalGenerado += p.total;
+      });
+    });
+
+    const categorias = Object.values(categoriasMap);
+
+    // ✅ Respuesta
     res.status(200).json({
       status: 'Success',
       message: 'Reporte completo generado.',
       data: {
-        ventas: buildVentas(),
-        total: buildTotal(),
-        top: buildTop(),
+        ventas: resumen,
+        total,
+        top,
         categorias
       }
     });
@@ -1011,6 +1007,7 @@ const getSpecificDayReport = async (req, res) => {
     });
   }
 };
+
 
 
 
