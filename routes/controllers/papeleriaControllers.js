@@ -1295,21 +1295,15 @@ const updateUser = async (req, res) => {
     const { id } = req.params;
     const { email, password } = req.body;
 
-    if (!email && !password) {
+    // Verificar si el ID es válido
+    if (!ObjectId.isValid(id)) {
       return res.status(400).json({
         status: "Error",
-        message: "Debe proporcionar al menos el nuevo correo o contraseña."
+        message: "ID de usuario no válido."
       });
     }
 
-    const user = await db.collection('usuarios').findOne({ _id: new ObjectId(id) });
-    if (!user) {
-      return res.status(404).json({
-        status: "Error",
-        message: "Usuario no encontrado."
-      });
-    }
-
+    // Construir el objeto de actualización
     const updateFields = {};
     if (email) updateFields.email = email;
     if (password) {
@@ -1317,22 +1311,35 @@ const updateUser = async (req, res) => {
       updateFields.password = hashedPassword;
     }
 
-    await db.collection('usuarios').updateOne(
+    if (Object.keys(updateFields).length === 0) {
+      return res.status(400).json({
+        status: "Error",
+        message: "No se proporcionaron campos para actualizar."
+      });
+    }
+
+    const result = await db.collection('users').findOneAndUpdate(
       { _id: new ObjectId(id) },
-      { $set: updateFields }
+      { $set: updateFields },
+      { returnDocument: 'after' } // Devuelve el documento actualizado
     );
 
-    const updatedUser = await db.collection('usuarios').findOne({ _id: new ObjectId(id) });
+    if (!result.value) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Usuario no encontrado."
+      });
+    }
 
     return res.status(200).json({
       status: "Success",
       message: "Usuario actualizado correctamente.",
       data: {
-        id: updatedUser._id,
-        name: updatedUser.name,
-        email: updatedUser.email,
-        role: updatedUser.role,
-        status: updatedUser.status
+        id: result.value._id,
+        name: result.value.name,
+        email: result.value.email,
+        role: result.value.role,
+        status: result.value.status
       }
     });
 
@@ -1340,11 +1347,12 @@ const updateUser = async (req, res) => {
     console.error('Error al actualizar usuario:', error);
     return res.status(500).json({
       status: "Error",
-      message: "Error interno del servidor",
+      message: "Error interno del servidor.",
       error: error.message
     });
   }
 };
+
 
 
 module.exports = {
