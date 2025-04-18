@@ -1293,53 +1293,53 @@ const updateUser = async (req, res) => {
   try {
     const db = await getDb();
     const { id } = req.params;
-    const { email, password } = req.body;
+    const { correo, password } = req.body;
 
-    // Verificar si el ID es válido
+    // Validar ID
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({
         status: "Error",
-        message: "ID de usuario no válido."
+        message: "ID de usuario inválido"
       });
     }
 
-    // Construir el objeto de actualización
+    // Buscar si existe el usuario
+    const existingUser = await db.collection('users').findOne({ _id: new ObjectId(id) });
+
+    if (!existingUser) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Usuario no encontrado"
+      });
+    }
+
+    // Preparar datos para actualizar
     const updateFields = {};
-    if (email) updateFields.email = email;
+
+    if (correo) {
+      updateFields.correo = correo;
+    }
+
     if (password) {
       const hashedPassword = CryptoJS.SHA256(password, process.env.CODE_SECRET_DATA).toString();
       updateFields.password = hashedPassword;
     }
 
-    if (Object.keys(updateFields).length === 0) {
-      return res.status(400).json({
-        status: "Error",
-        message: "No se proporcionaron campos para actualizar."
-      });
-    }
+    updateFields.lastUpdate = moment().tz("America/Bogota").format('YYYY-MM-DD HH:mm:ss');
 
-    const result = await db.collection('users').findOneAndUpdate(
+    // Actualizar en la base de datos
+    await db.collection('users').updateOne(
       { _id: new ObjectId(id) },
-      { $set: updateFields },
-      { returnDocument: 'after' } // Devuelve el documento actualizado
+      { $set: updateFields }
     );
-
-    if (!result.value) {
-      return res.status(404).json({
-        status: "Error",
-        message: "Usuario no encontrado."
-      });
-    }
 
     return res.status(200).json({
       status: "Success",
-      message: "Usuario actualizado correctamente.",
+      message: "Usuario actualizado correctamente",
       data: {
-        id: result.value._id,
-        name: result.value.name,
-        email: result.value.email,
-        role: result.value.role,
-        status: result.value.status
+        id,
+        correo: updateFields.correo || existingUser.correo,
+        lastUpdate: updateFields.lastUpdate
       }
     });
 
@@ -1347,12 +1347,11 @@ const updateUser = async (req, res) => {
     console.error('Error al actualizar usuario:', error);
     return res.status(500).json({
       status: "Error",
-      message: "Error interno del servidor.",
+      message: "Error interno del servidor",
       error: error.message
     });
   }
 };
-
 
 
 module.exports = {
