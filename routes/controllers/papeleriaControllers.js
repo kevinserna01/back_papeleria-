@@ -1364,6 +1364,65 @@ const updateUser = async (req, res) => {
     });
   }
 };
+const loginUser = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Email y contraseña son requeridos"
+      });
+    }
+
+    const user = await db.collection('usuarios').findOne({ email });
+
+    if (!user) {
+      return res.status(401).json({
+        status: "Error",
+        message: "Credenciales inválidas"
+      });
+    }
+
+    const hashedPassword = CryptoJS.SHA256(password, process.env.CODE_SECRET_DATA).toString();
+
+    if (user.password !== hashedPassword) {
+      return res.status(401).json({
+        status: "Error",
+        message: "Credenciales inválidas"
+      });
+    }
+
+    // Crear token JWT
+    const token = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.CODE_SECRET_JWT,
+      { expiresIn: '12h' }
+    );
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Inicio de sesión exitoso",
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al iniciar sesión:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno del servidor",
+      error: error.message
+    });
+  }
+};
+
 
 module.exports = {
     registertrabajador,
@@ -1391,5 +1450,6 @@ module.exports = {
     getDashboardData,
     getUsers,
     createUser,
-    updateUser
+    updateUser,
+    loginUser
 };
