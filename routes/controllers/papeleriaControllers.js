@@ -1002,17 +1002,20 @@ const getSpecificDayReport = async (req, res) => {
 
 
 
-// Middleware para verificar el token
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
-  if (!token) return res.status(401).json({ message: 'Token no proporcionado' });
+  if (!token) {
+    return res.status(401).json({ status: "Error", message: 'Token no proporcionado' });
+  }
 
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ message: 'Token inválido o expirado' });
+  jwt.verify(token, process.env.CODE_SECRET_JWT, (err, user) => {  // <--- CORREGIDO aquí
+    if (err) {
+      return res.status(403).json({ status: "Error", message: 'Token inválido o expirado' });
+    }
 
-    req.user = user;
+    req.user = user; // Guarda los datos del usuario extraídos del token
     next();
   });
 };
