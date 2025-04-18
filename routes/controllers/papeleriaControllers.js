@@ -1293,54 +1293,55 @@ const createUser = async (req, res) => {
 const updateUser = async (req, res) => {
   try {
     const db = await getDb();
-    const { id } = req.params;
-    const { correo, password } = req.body;
 
-    // Validar ID
-    if (!ObjectId.isValid(id)) {
+    const { id } = req.params;
+    const { email, password } = req.body;
+
+    if (!id) {
       return res.status(400).json({
         status: "Error",
-        message: "ID de usuario inválido"
+        message: "ID de usuario es requerido"
       });
     }
 
-    // Buscar si existe el usuario
-    const existingUser = await db.collection('users').findOne({ _id: new ObjectId(id) });
+    const user = await db.collection('usuarios').findOne({ _id: new ObjectId(id) });
 
-    if (!existingUser) {
+    if (!user) {
       return res.status(404).json({
         status: "Error",
         message: "Usuario no encontrado"
       });
     }
 
-    // Preparar datos para actualizar
     const updateFields = {};
-
-    if (correo) {
-      updateFields.correo = correo;
+    
+    if (email) {
+      updateFields.email = email;
     }
 
     if (password) {
-      const hashedPassword = CryptoJS.SHA256(password, process.env.CODE_SECRET_DATA).toString();
-      updateFields.password = hashedPassword;
+      updateFields.password = CryptoJS.SHA256(password, process.env.CODE_SECRET_DATA).toString();
     }
 
-    updateFields.lastUpdate = moment().tz("America/Bogota").format('YYYY-MM-DD HH:mm:ss');
+    updateFields.updatedAt = moment().tz("America/Bogota").format('YYYY-MM-DD HH:mm:ss');
 
-    // Actualizar en la base de datos
-    await db.collection('users').updateOne(
+    await db.collection('usuarios').updateOne(
       { _id: new ObjectId(id) },
       { $set: updateFields }
     );
+
+    const updatedUser = await db.collection('usuarios').findOne({ _id: new ObjectId(id) });
 
     return res.status(200).json({
       status: "Success",
       message: "Usuario actualizado correctamente",
       data: {
-        id,
-        correo: updateFields.correo || existingUser.correo,
-        lastUpdate: updateFields.lastUpdate
+        id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        status: updatedUser.status,
+        updatedAt: updatedUser.updatedAt
       }
     });
 
