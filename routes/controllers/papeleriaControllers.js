@@ -1116,6 +1116,107 @@ const loginadmin = async (req, res) => {
   }
 };
 
+const getDashboardData = async (req, res) => {
+  try {
+    const db = await getDb();
+    const ventasCol = db.collection('ventas');
+    const productosCol = db.collection('productos');
+
+    const today = new Date();
+    const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+    const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    // 🧾 Ventas por rango de fechas
+    const dailySalesCursor = await ventasCol.find({
+      fecha: { $gte: startOfMonth, $lte: new Date() }
+    }).toArray();
+
+    const dailySales = {};
+    dailySalesCursor.forEach(v => {
+      const dateStr = new Date(v.fecha).toISOString().split('T')[0];
+      dailySales[dateStr] = (dailySales[dateStr] || 0) + v.totalVenta;
+    });
+
+    const dailySalesArray = Object.entries(dailySales).map(([date, total]) => ({
+      date,
+      total
+    })).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    const salesSummary = {
+      daily: dailySalesArray.find(d => d.date === new Date().toISOString().split('T')[0])?.total || 0,
+      weekly: dailySalesArray
+        .filter(d => new Date(d.date) >= oneWeekAgo)
+        .reduce((acc, curr) => acc + curr.total, 0),
+      monthly: dailySalesArray.reduce((acc, curr) => acc + curr.total, 0),
+      dailySales: dailySalesArray
+    };
+
+    // 🥇 Top productos
+    const productos = await productosCol.find().toArray();
+    const topMap = {};
+
+    dailySalesCursor.forEach(v => {
+      v.productos.forEach(p => {
+        if (!topMap[p._id]) {
+          const prod = productos.find(prod => prod._id.toString() === p._id.toString());
+          if (prod) {
+            topMap[p._id] = {
+              id: p._id,
+              name: p.name,
+              category: prod.categoria || 'Sin categoría',
+              sales: 0,
+              revenue: 0
+            };
+          }
+        }
+
+        if (topMap[p._id]) {
+          topMap[p._id].sales += p.cantidad;
+          topMap[p._id].revenue += p.precio * p.cantidad;
+        }
+      });
+    });
+
+    const topProducts = Object.values(topMap)
+      .sort((a, b) => b.sales - a.sales)
+      .slice(0, 5);
+
+    // 📦 Bajo inventario
+    const lowStockItems = productos
+      .filter(p => p.stock <= (p.minStock || 10))
+      .map(p => ({
+        id: p._id,
+        name: p.name,
+        stock: p.stock,
+        minStock: p.minStock || 10,
+        category: p.categoria || 'Sin categoría',
+        lastUpdate: p.updatedAt ? new Date(p.updatedAt).toISOString() : null
+      }));
+
+    res.status(200).json({
+      status: 'Success',
+      data: {
+        salesSummary,
+        topProducts,
+        lowStockItems
+      }
+    });
+
+  } catch (error) {
+    console.error('Error en dashboardapi:', error);
+    res.status(500).json({
+      status: 'Error',
+      message: 'No se pudieron obtener los datos del dashboard.',
+      error: error.message
+    });
+  }
+};
+
 
 module.exports = {
     registertrabajador,
@@ -1139,6 +1240,7 @@ module.exports = {
     verifyToken,
     registeradmin,
     loginadmin,
-    getSpecificDayReport
+    getSpecificDayReport,
+    getDashboardData
     
 };
