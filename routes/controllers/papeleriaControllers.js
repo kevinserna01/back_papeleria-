@@ -1293,38 +1293,56 @@ const updateUser = async (req, res) => {
   try {
     const db = await getDb();
     const { id } = req.params;
-    const { name, email, password, role } = req.body;
+    const { email, password } = req.body;
 
-    const updates = {
-      name,
-      email,
-      role
-    };
-
-    if (password) {
-      updates.password = await bcrypt.hash(password, 10);
+    if (!email && !password) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Debe proporcionar al menos el nuevo correo o contraseña."
+      });
     }
 
-    await db.collection('users').updateOne(
+    const user = await db.collection('usuarios').findOne({ _id: new ObjectId(id) });
+    if (!user) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Usuario no encontrado."
+      });
+    }
+
+    const updateFields = {};
+    if (email) updateFields.email = email;
+    if (password) {
+      const hashedPassword = CryptoJS.SHA256(password, process.env.CODE_SECRET_DATA).toString();
+      updateFields.password = hashedPassword;
+    }
+
+    await db.collection('usuarios').updateOne(
       { _id: new ObjectId(id) },
-      { $set: updates }
+      { $set: updateFields }
     );
 
-    const updatedUser = await db.collection('users').findOne({ _id: new ObjectId(id) });
+    const updatedUser = await db.collection('usuarios').findOne({ _id: new ObjectId(id) });
 
-    res.status(200).json({
-      status: 'Success',
-      message: 'Usuario actualizado correctamente.',
+    return res.status(200).json({
+      status: "Success",
+      message: "Usuario actualizado correctamente.",
       data: {
-        id: updatedUser._id.toString(),
+        id: updatedUser._id,
         name: updatedUser.name,
         email: updatedUser.email,
         role: updatedUser.role,
-        status: updatedUser.status || 'active'
+        status: updatedUser.status
       }
     });
+
   } catch (error) {
-    res.status(500).json({ status: 'Error', message: 'No se pudo actualizar el usuario.', error: error.message });
+    console.error('Error al actualizar usuario:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno del servidor",
+      error: error.message
+    });
   }
 };
 
