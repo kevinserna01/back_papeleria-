@@ -1367,46 +1367,60 @@ const updateUser = async (req, res) => {
     });
   }
 };
-const loginUser = async (req, res) => {
+ const loginUser = async (req, res) => {
   try {
     const db = await getDb();
+
     const { email, password } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({
         status: "Error",
-        message: "Email y contraseña son requeridos"
-      });
-    }
-
-    const user = await db.collection('usuarios').findOne({ email });
-
-    if (!user) {
-      return res.status(401).json({
-        status: "Error",
-        message: "Credenciales inválidas"
+        message: "Email y contraseña son obligatorios."
       });
     }
 
     const hashedPassword = CryptoJS.SHA256(password, process.env.CODE_SECRET_DATA).toString();
 
-    if (user.password !== hashedPassword) {
+    // Buscar primero en usuarios
+    let user = await db.collection('usuarios').findOne({ email });
+
+    if (!user) {
+      // Si no está en usuarios, buscar en administradores
+      user = await db.collection('administradores').findOne({ correo: email });
+      if (user) {
+        // Ajustar campos para que coincida con la respuesta esperada
+        user = {
+          _id: user._id,
+          name: 'Administrador', // o si tienes nombre, ponlo
+          email: user.correo,
+          password: user.password,
+          role: 'admin',
+          status: 'active',
+        };
+      }
+    }
+
+    if (!user || user.password !== hashedPassword) {
       return res.status(401).json({
         status: "Error",
         message: "Credenciales inválidas"
       });
     }
 
-    // Crear token JWT
+    // Generar token
     const token = jwt.sign(
-      { id: user._id, role: user.role },
-      process.env.CODE_SECRET_JWT,
-      { expiresIn: '12h' }
+      {
+        id: user._id,
+        role: user.role
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
     );
 
     return res.status(200).json({
       status: "Success",
-      message: "Inicio de sesión exitoso",
+      message: "Inicio de sesión exitoso.",
       token,
       user: {
         id: user._id,
@@ -1417,7 +1431,7 @@ const loginUser = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error al iniciar sesión:', error);
+    console.error('Error en loginUser:', error);
     return res.status(500).json({
       status: "Error",
       message: "Error interno del servidor",
@@ -1425,6 +1439,7 @@ const loginUser = async (req, res) => {
     });
   }
 };
+
 
 
 module.exports = {
