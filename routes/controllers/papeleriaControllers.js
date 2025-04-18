@@ -1207,6 +1207,106 @@ const getDashboardData = async (req, res) => {
   }
 };
 
+const getUsers = async (req, res) => {
+  try {
+    const db = await getDb();
+    const users = await db.collection('users').find().toArray();
+
+    const formattedUsers = users.map(u => ({
+      id: u._id.toString(),
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      status: u.status || 'active'
+    }));
+
+    res.status(200).json({ status: 'Success', data: formattedUsers });
+  } catch (error) {
+    res.status(500).json({ status: 'Error', message: 'No se pudieron obtener los usuarios.', error: error.message });
+  }
+};
+
+const createUser = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { name, email, password, role } = req.body;
+
+    if (!name || !email || !password || !role) {
+      return res.status(400).json({ status: 'Error', message: 'Todos los campos son obligatorios.' });
+    }
+
+    const existing = await db.collection('users').findOne({ email });
+    if (existing) {
+      return res.status(400).json({ status: 'Error', message: 'El correo ya está registrado.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = {
+      name,
+      email,
+      password: hashedPassword,
+      role,
+      status: 'active',
+      createdAt: new Date()
+    };
+
+    const result = await db.collection('users').insertOne(newUser);
+
+    res.status(201).json({
+      status: 'Success',
+      message: 'Usuario creado exitosamente.',
+      data: {
+        id: result.insertedId.toString(),
+        name,
+        email,
+        role,
+        status: 'active'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'Error', message: 'Error al crear el usuario.', error: error.message });
+  }
+};
+
+const updateUser = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { id } = req.params;
+    const { name, email, password, role } = req.body;
+
+    const updates = {
+      name,
+      email,
+      role
+    };
+
+    if (password) {
+      updates.password = await bcrypt.hash(password, 10);
+    }
+
+    await db.collection('users').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updates }
+    );
+
+    const updatedUser = await db.collection('users').findOne({ _id: new ObjectId(id) });
+
+    res.status(200).json({
+      status: 'Success',
+      message: 'Usuario actualizado correctamente.',
+      data: {
+        id: updatedUser._id.toString(),
+        name: updatedUser.name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        status: updatedUser.status || 'active'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'Error', message: 'No se pudo actualizar el usuario.', error: error.message });
+  }
+};
+
 
 module.exports = {
     registertrabajador,
@@ -1231,6 +1331,8 @@ module.exports = {
     registeradmin,
     loginadmin,
     getSpecificDayReport,
-    getDashboardData
-    
+    getDashboardData,
+    getUsers,
+    createUser,
+    updateUser
 };
