@@ -1295,7 +1295,7 @@ const updateUser = async (req, res) => {
     const db = await getDb();
 
     const { id } = req.params;
-    const { email, password } = req.body;
+    const { email, password, status } = req.body;
 
     if (!id) {
       return res.status(400).json({
@@ -1314,13 +1314,23 @@ const updateUser = async (req, res) => {
     }
 
     const updateFields = {};
-    
+
     if (email) {
       updateFields.email = email;
     }
 
     if (password) {
       updateFields.password = CryptoJS.SHA256(password, process.env.CODE_SECRET_DATA).toString();
+    }
+
+    if (status) {
+      if (status !== 'active' && status !== 'inactive') {
+        return res.status(400).json({
+          status: "Error",
+          message: "El estado debe ser 'active' o 'inactive'."
+        });
+      }
+      updateFields.status = status;
     }
 
     updateFields.updatedAt = moment().tz("America/Bogota").format('YYYY-MM-DD HH:mm:ss');
@@ -1354,7 +1364,6 @@ const updateUser = async (req, res) => {
     });
   }
 };
-
 
 module.exports = {
     registertrabajador,
