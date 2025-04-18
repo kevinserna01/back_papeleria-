@@ -1232,39 +1232,52 @@ const createUser = async (req, res) => {
     const { name, email, password, role } = req.body;
 
     if (!name || !email || !password || !role) {
-      return res.status(400).json({ status: 'Error', message: 'Todos los campos son obligatorios.' });
+      return res.status(400).json({
+        status: "Error",
+        message: "Todos los campos son obligatorios."
+      });
     }
 
-    const existing = await db.collection('users').findOne({ email });
-    if (existing) {
-      return res.status(400).json({ status: 'Error', message: 'El correo ya está registrado.' });
+    const existingUser = await db.collection('usuarios').findOne({ email });
+    if (existingUser) {
+      return res.status(409).json({
+        status: "Error",
+        message: "Ya existe un usuario con ese correo."
+      });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = CryptoJS.SHA256(password, process.env.CODE_SECRET_DATA).toString();
+
     const newUser = {
       name,
       email,
       password: hashedPassword,
       role,
-      status: 'active',
-      createdAt: new Date()
+      status: "active",
+      createdAt: moment().tz("America/Bogota").format('YYYY-MM-DD HH:mm:ss')
     };
 
-    const result = await db.collection('users').insertOne(newUser);
+    await db.collection('usuarios').insertOne(newUser);
 
-    res.status(201).json({
-      status: 'Success',
-      message: 'Usuario creado exitosamente.',
+    return res.status(201).json({
+      status: "Success",
+      message: "Usuario creado correctamente.",
       data: {
-        id: result.insertedId.toString(),
-        name,
-        email,
-        role,
-        status: 'active'
+        id: newUser._id,
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role,
+        status: newUser.status
       }
     });
+
   } catch (error) {
-    res.status(500).json({ status: 'Error', message: 'Error al crear el usuario.', error: error.message });
+    console.error('Error al registrar usuario:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno del servidor",
+      error: error.message
+    });
   }
 };
 
