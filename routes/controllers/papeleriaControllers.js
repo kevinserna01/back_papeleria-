@@ -1210,19 +1210,27 @@ const getDashboardData = async (req, res) => {
 const getUsers = async (req, res) => {
   try {
     const db = await getDb();
-    const users = await db.collection('users').find().toArray();
+    const users = await db.collection('usuarios').find({}).toArray();
 
-    const formattedUsers = users.map(u => ({
-      id: u._id.toString(),
-      name: u.name,
-      email: u.email,
-      role: u.role,
-      status: u.status || 'active'
+    const formattedUsers = users.map(user => ({
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: user.status || 'active'
     }));
 
-    res.status(200).json({ status: 'Success', data: formattedUsers });
+    return res.status(200).json({
+      status: "Success",
+      data: formattedUsers
+    });
   } catch (error) {
-    res.status(500).json({ status: 'Error', message: 'No se pudieron obtener los usuarios.', error: error.message });
+    console.error('Error al obtener usuarios:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno del servidor",
+      error: error.message
+    });
   }
 };
 

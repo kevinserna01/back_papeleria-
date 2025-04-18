@@ -38,7 +38,7 @@ mongoose.connect(process.env.MONGO_URI)
    router.post('/loginadminapi', loginadmin);
    router.get('/reportsapi/day', getSpecificDayReport);
    router.get('/dashboardapi', getDashboardData);
-   router.get('/getUsersapi', getUsers);
+   router.get('/getUsersapi', verifyToken, getUsers);
    router.post('/createUserapi', createUser);
    router.put('/updateUserapi', updateUser);
 
