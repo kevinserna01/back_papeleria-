@@ -1119,94 +1119,89 @@ const loginadmin = async (req, res) => {
 const getDashboardData = async (req, res) => {
   try {
     const db = await getDb();
-    const ventasCol = db.collection("ventas");
-    const productosCol = db.collection("productos");
+    const ventasCol = db.collection('ventas');
+    const productosCol = db.collection('productos');
+    const inventarioCol = db.collection('inventario');
 
-    const today = new Date();
-    const startOfToday = new Date(today.setHours(0, 0, 0, 0));
-    const startOfWeek = new Date();
-    startOfWeek.setDate(today.getDate() - 7);
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    // Ventas agrupadas por día
-    const dailySales = await ventasCol.aggregate([
-      { $match: { fecha: { $gte: startOfToday } } },
-      {
-        $group: {
-          _id: { $dateToString: { format: "%Y-%m-%d", date: "$fecha" } },
-          total: { $sum: "$totalVenta" }
-        }
-      },
-      { $sort: { _id: 1 } }
-    ]).toArray();
+    // Obtener ventas por rango
+    const ventas = await ventasCol.find({}).toArray();
 
-    const weeklySales = await ventasCol.aggregate([
-      { $match: { fecha: { $gte: startOfWeek } } },
-      { $group: { _id: null, total: { $sum: "$totalVenta" } } }
-    ]).toArray();
+    const filtrarPorRango = (fechaInicio) => ventas.filter(v => new Date(v.fecha) >= fechaInicio);
 
-    const monthlySales = await ventasCol.aggregate([
-      { $match: { fecha: { $gte: startOfMonth } } },
-      { $group: { _id: null, total: { $sum: "$totalVenta" } } }
-    ]).toArray();
+    const sumarTotal = (ventas) => ventas.reduce((acc, v) => acc + v.totalVenta, 0);
 
-    // Productos más vendidos
-    const topProductsAgg = await ventasCol.aggregate([
-      { $unwind: "$productos" },
-      {
-        $group: {
-          _id: "$productos.code",
-          name: { $first: "$productos.name" },
-          category: { $first: "$productos.category" },
-          sales: { $sum: "$productos.cantidad" },
-          revenue: { $sum: { $multiply: ["$productos.cantidad", "$productos.price"] } }
-        }
-      },
-      { $sort: { sales: -1 } },
-      { $limit: 5 }
-    ]).toArray();
+    const ventasDiarias = filtrarPorRango(startOfToday);
+    const ventasSemanales = filtrarPorRango(startOfWeek);
+    const ventasMensuales = filtrarPorRango(startOfMonth);
 
-    // Productos con bajo stock
-    const lowStockItems = await productosCol.find({
-      $expr: { $lt: ["$stock", "$minStock"] }
-    }).toArray();
-
-    const lowStockFormatted = lowStockItems.map(p => ({
-      id: p._id.toString(),
-      name: p.name,
-      stock: p.stock,
-      minStock: p.minStock,
-      category: p.category,
-      lastUpdate: p.lastUpdate ? new Date(p.lastUpdate).toISOString() : null
+    const dailySales = ventasDiarias.map(v => ({
+      date: new Date(v.fecha).toISOString().split('T')[0],
+      total: v.totalVenta
     }));
 
-    return res.status(200).json({
+    // Agrupar productos por código
+    const conteoProductos = {};
+    ventas.forEach(v => {
+      v.productos.forEach(p => {
+        if (!conteoProductos[p.code]) {
+          conteoProductos[p.code] = { ...p, cantidad: 0 };
+        }
+        conteoProductos[p.code].cantidad += p.cantidad;
+      });
+    });
+
+    // Buscar detalles del producto en productosCol
+    const topProducts = await Promise.all(
+      Object.entries(conteoProductos)
+        .sort((a, b) => b[1].cantidad - a[1].cantidad)
+        .map(async ([code, info]) => {
+          const prod = await productosCol.findOne({ code });
+          return {
+            id: code,
+            name: info.name,
+            category: prod?.category || null,
+            sales: info.cantidad,
+            revenue: (prod?.price || 0) * info.cantidad
+          };
+        })
+    );
+
+    // Buscar productos con stock bajo
+    const lowStockItemsCursor = await inventarioCol.find({ $expr: { $lte: ["$stock", "$minStock"] } }).sort({ stock: 1 }).toArray();
+
+    const lowStockItems = lowStockItemsCursor.map(item => ({
+      id: item.code,
+      name: item.name,
+      stock: item.stock,
+      minStock: item.minStock,
+      category: item.category,
+      lastUpdate: item.lastUpdate
+    }));
+
+    res.status(200).json({
       status: "Success",
       data: {
         salesSummary: {
-          daily: dailySales.reduce((sum, d) => sum + d.total, 0),
-          weekly: weeklySales[0]?.total || 0,
-          monthly: monthlySales[0]?.total || 0,
-          dailySales: dailySales.map(d => ({
-            date: d._id,
-            total: d.total
-          }))
+          daily: sumarTotal(ventasDiarias),
+          weekly: sumarTotal(ventasSemanales),
+          monthly: sumarTotal(ventasMensuales),
+          dailySales
         },
-        topProducts: topProductsAgg.map(p => ({
-          id: p._id,
-          name: p.name,
-          category: p.category,
-          sales: p.sales,
-          revenue: p.revenue
-        })),
-        lowStockItems: lowStockFormatted
+        topProducts,
+        lowStockItems
       }
     });
+
   } catch (error) {
     console.error("Error en getDashboardData:", error);
     res.status(500).json({
       status: "Error",
-      message: "Error al obtener datos del dashboard",
+      message: "No se pudo cargar el dashboard",
       error: error.message
     });
   }
