@@ -1439,7 +1439,7 @@ const updateUser = async (req, res) => {
     });
   }
 };
-const jwt = require('jsonwebtoken');
+
 
 const refreshToken = (req, res) => {
   const authHeader = req.headers['authorization'];
@@ -1500,5 +1500,6 @@ module.exports = {
     createUser,
     updateUser,
     loginUser,
+    refreshToken
     
 };
