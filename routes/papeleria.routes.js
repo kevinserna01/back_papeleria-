@@ -42,6 +42,8 @@ mongoose.connect(process.env.MONGO_URI)
    router.post('/createUserapi', createUser);
    router.put('/updateUserapi/:id', updateUser);
    router.post('/loginUserapi', loginUser);
+   router.post('/refresh-token', refreshToken);
+
 
 
 

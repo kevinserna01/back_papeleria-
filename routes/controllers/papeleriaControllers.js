@@ -1439,6 +1439,36 @@ const updateUser = async (req, res) => {
     });
   }
 };
+const jwt = require('jsonwebtoken');
+
+const refreshToken = (req, res) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ status: "Error", message: "Token no proporcionado" });
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET, async (err, userData) => {
+    if (err) {
+      return res.status(403).json({ status: "Error", message: "Token inválido o expirado" });
+    }
+
+    // Puedes incluir más info del usuario si lo deseas
+    const newToken = jwt.sign({
+      id: userData.id,
+      name: userData.name,
+      email: userData.email,
+      role: userData.role
+    }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Token renovado exitosamente",
+      token: newToken
+    });
+  });
+};
 
 
 
@@ -1469,5 +1499,6 @@ module.exports = {
     getUsers,
     createUser,
     updateUser,
-    loginUser
+    loginUser,
+    refreshToken
 };
