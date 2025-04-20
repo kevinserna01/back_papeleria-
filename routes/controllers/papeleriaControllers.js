@@ -1500,5 +1500,5 @@ module.exports = {
     createUser,
     updateUser,
     loginUser,
-    refreshToken
+    
 };
