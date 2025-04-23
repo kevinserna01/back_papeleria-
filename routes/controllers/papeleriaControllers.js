@@ -1386,23 +1386,9 @@ const loginUser = async (req, res) => {
       });
     }
 
-    const payload = { id: user._id, name: user.name, email: user.email, role: user.role };
-
-    const accessToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '15m' });
-    const refreshToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
-
-    // Guardar refreshToken en la base
-    await db.collection('tokens').updateOne(
-      { userId: user._id },
-      { $set: { refreshToken } },
-      { upsert: true }
-    );
-
     return res.status(200).json({
       status: "Success",
       message: "Inicio de sesión exitoso.",
-      accessToken,
-      refreshToken,
       user: {
         id: user._id,
         name: user.name,
@@ -1419,7 +1405,8 @@ const loginUser = async (req, res) => {
       error: error.message
     });
   }
-}
+};
+
 
 
 
