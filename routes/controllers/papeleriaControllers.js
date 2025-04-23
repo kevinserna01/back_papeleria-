@@ -1102,47 +1102,52 @@ const getDashboardData = async (req, res) => {
     const productosCol = db.collection('productos');
     const inventarioCol = db.collection('inventario');
 
-    const now = new Date();
-    const colombiaOffset = -5 * 60; // UTC-5
-    const fechaColombiana = new Date(now.getTime() + colombiaOffset * 60000);
+    const getColombianDate = () => {
+      const utc = new Date();
+      const colombiaTime = utc.toLocaleString("en-US", { timeZone: "America/Bogota" });
+      return new Date(colombiaTime);
+    };
 
-    // Calcular fechas en zona horaria colombiana
-    const startOfToday = new Date(fechaColombiana.getFullYear(), fechaColombiana.getMonth(), fechaColombiana.getDate());
+    const getStartOfColombianDay = () => {
+      const date = getColombianDate();
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    };
+
+    const now = getColombianDate();
+    const startOfToday = getStartOfColombianDay();
     const startOfWeek = new Date(startOfToday);
-    startOfWeek.setDate(startOfWeek.getDate() - 6); // Últimos 7 días
-
-    const startOfMonth = new Date(fechaColombiana.getFullYear(), fechaColombiana.getMonth(), 1);
+    startOfWeek.setDate(startOfWeek.getDate() - 6);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const ventas = await ventasCol.find({}).toArray();
 
-    const filtrarPorRango = (fechaInicio) =>
-      ventas.filter(v => new Date(v.fecha) >= fechaInicio);
+    const filtrarPorRango = (fechaInicio) => ventas.filter(v => new Date(v.fecha) >= fechaInicio);
 
-    const sumarTotal = (ventas) =>
-      ventas.reduce((acc, v) => acc + v.totalVenta, 0);
+    const sumarTotal = (ventas) => ventas.reduce((acc, v) => acc + v.totalVenta, 0);
 
     const ventasDiarias = filtrarPorRango(startOfToday);
     const ventasSemanales = filtrarPorRango(startOfWeek);
     const ventasMensuales = filtrarPorRango(startOfMonth);
 
-    // Formato local colombiano
-    const formatter = new Intl.DateTimeFormat("es-CO", {
-      timeZone: "America/Bogota",
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
+    const formatearFechaColombiana = (fechaISO) => {
+      const fecha = new Date(fechaISO);
+      return fecha.toLocaleString("es-CO", {
+        timeZone: "America/Bogota",
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "numeric",
+        minute: "numeric",
+        hour12: true
+      });
+    };
 
     const dailySales = ventasDiarias.map(v => ({
-      date: formatter.format(new Date(v.fecha)),
+      date: formatearFechaColombiana(v.fecha),
       total: v.totalVenta
     }));
 
-    // Agrupar productos por código
     const conteoProductos = {};
     ventas.forEach(v => {
       v.productos.forEach(p => {
@@ -1179,9 +1184,7 @@ const getDashboardData = async (req, res) => {
       stock: item.stock,
       minStock: item.minStock,
       category: item.category,
-      lastUpdate: item.lastUpdate
-        ? formatter.format(new Date(item.lastUpdate))
-        : null
+      lastUpdate: formatearFechaColombiana(item.lastUpdate)
     }));
 
     res.status(200).json({
