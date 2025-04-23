@@ -2,7 +2,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 const router = express.Router();
 const mongoose = require('mongoose');
-const { registertrabajador, loginTrabajador,logoutTrabajador,newProduct,getProducts,updateProduct,deleteProduct,assignProductToInventory,getInventoryProducts,updateInventoryProduct,deleteInventoryProduct,getProductsWithStock,createSale,checkAndReserveSaleCode,releaseSaleCode,getLastRegisteredSaleCode,getAllSales,getReportsData,verifyToken,registeradmin,loginadmin,getSpecificDayReport,getDashboardData,getUsers,createUser,updateUser,loginUser,refreshToken} =require('./controllers/papeleriaControllers');
+const { registertrabajador, loginTrabajador,logoutTrabajador,newProduct,getProducts,updateProduct,deleteProduct,assignProductToInventory,getInventoryProducts,updateInventoryProduct,deleteInventoryProduct,getProductsWithStock,createSale,checkAndReserveSaleCode,releaseSaleCode,getLastRegisteredSaleCode,getAllSales,getReportsData,registeradmin,loginadmin,getSpecificDayReport,getDashboardData,getUsers,createUser,updateUser,loginUser} =require('./controllers/papeleriaControllers');
 
 dotenv.config({ path: './config.env' }); 
 
@@ -33,16 +33,16 @@ mongoose.connect(process.env.MONGO_URI)
    router.post('/releaseSaleCodeapi/:code', releaseSaleCode);
    router.get('/getLastSaleCodeapi', getLastRegisteredSaleCode);
    router.get('/salesapi', getAllSales);
-   router.get('/reportsapi', verifyToken, getReportsData);
+   router.get('/reportsapi', getReportsData);
    router.post('/registeradminapi', registeradmin);
    router.post('/loginadminapi', loginadmin);
    router.get('/reportsapi/day', getSpecificDayReport);
    router.get('/dashboardapi', getDashboardData);
-   router.get('/getUsersapi', verifyToken, getUsers);
+   router.get('/getUsersapi', getUsers);
    router.post('/createUserapi', createUser);
    router.put('/updateUserapi/:id', updateUser);
    router.post('/loginUserapi', loginUser);
-   router.post('/refresh-token', refreshToken);
+   
 
 
 

@@ -2,7 +2,6 @@ const CryptoJS = require('crypto-js');
 const moment = require('moment-timezone');
 const PDFDocument = require('pdfkit');
 const ExcelJS = require('exceljs');
-const jwt = require('jsonwebtoken');
 const { ObjectId } = require('mongodb');
 const { getDb }  = require('../../database/mongo'); 
 
@@ -1002,23 +1001,6 @@ const getSpecificDayReport = async (req, res) => {
 
 
 
-const verifyToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ status: "Error", message: 'Token no proporcionado' });
-  }
-
-  jwt.verify(token, process.env.CODE_SECRET_JWT, (err, user) => {  // <--- CORREGIDO aquí
-    if (err) {
-      return res.status(403).json({ status: "Error", message: 'Token inválido o expirado' });
-    }
-
-    req.user = user; // Guarda los datos del usuario extraídos del token
-    next();
-  });
-};
 
 const registeradmin = async (req, res) => {
   try {
@@ -1367,10 +1349,9 @@ const updateUser = async (req, res) => {
     });
   }
 };
- const loginUser = async (req, res) => {
+const loginUser = async (req, res) => {
   try {
     const db = await getDb();
-
     const { email, password } = req.body;
 
     if (!email || !password) {
@@ -1382,21 +1363,18 @@ const updateUser = async (req, res) => {
 
     const hashedPassword = CryptoJS.SHA256(password, process.env.CODE_SECRET_DATA).toString();
 
-    // Buscar primero en usuarios
     let user = await db.collection('usuarios').findOne({ email });
 
     if (!user) {
-      // Si no está en usuarios, buscar en administradores
-      user = await db.collection('administradores').findOne({ correo: email });
-      if (user) {
-        // Ajustar campos para que coincida con la respuesta esperada
+      const admin = await db.collection('administradores').findOne({ correo: email });
+      if (admin) {
         user = {
-          _id: user._id,
-          name: 'Administrador', // o si tienes nombre, ponlo
-          email: user.correo,
-          password: user.password,
+          _id: admin._id,
+          name: 'Administrador',
+          email: admin.correo,
+          password: admin.password,
           role: 'admin',
-          status: 'active',
+          status: 'active'
         };
       }
     }
@@ -1408,20 +1386,23 @@ const updateUser = async (req, res) => {
       });
     }
 
-    // Generar token
-    const token = jwt.sign(
-      {
-        id: user._id,
-        role: user.role
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+    const payload = { id: user._id, name: user.name, email: user.email, role: user.role };
+
+    const accessToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const refreshToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
+
+    // Guardar refreshToken en la base
+    await db.collection('tokens').updateOne(
+      { userId: user._id },
+      { $set: { refreshToken } },
+      { upsert: true }
     );
 
     return res.status(200).json({
       status: "Success",
       message: "Inicio de sesión exitoso.",
-      token,
+      accessToken,
+      refreshToken,
       user: {
         id: user._id,
         name: user.name,
@@ -1438,37 +1419,12 @@ const updateUser = async (req, res) => {
       error: error.message
     });
   }
-};
+}
 
 
-const refreshToken = (req, res) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
 
-  if (!token) {
-    return res.status(401).json({ status: "Error", message: "Token no proporcionado" });
-  }
 
-  jwt.verify(token, process.env.JWT_SECRET, async (err, userData) => {
-    if (err) {
-      return res.status(403).json({ status: "Error", message: "Token inválido o expirado" });
-    }
 
-    // Puedes incluir más info del usuario si lo deseas
-    const newToken = jwt.sign({
-      id: userData.id,
-      name: userData.name,
-      email: userData.email,
-      role: userData.role
-    }, process.env.JWT_SECRET, { expiresIn: '1h' });
-
-    return res.status(200).json({
-      status: "Success",
-      message: "Token renovado exitosamente",
-      token: newToken
-    });
-  });
-};
 
 
 
@@ -1491,7 +1447,6 @@ module.exports = {
     getLastRegisteredSaleCode,
     getAllSales,
     getReportsData,
-    verifyToken,
     registeradmin,
     loginadmin,
     getSpecificDayReport,
@@ -1500,6 +1455,6 @@ module.exports = {
     createUser,
     updateUser,
     loginUser,
-    refreshToken
+    
     
 };
