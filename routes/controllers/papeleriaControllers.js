@@ -1103,23 +1103,42 @@ const getDashboardData = async (req, res) => {
     const inventarioCol = db.collection('inventario');
 
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const colombiaOffset = -5 * 60; // UTC-5
+    const fechaColombiana = new Date(now.getTime() + colombiaOffset * 60000);
 
-    // Obtener ventas por rango
+    // Calcular fechas en zona horaria colombiana
+    const startOfToday = new Date(fechaColombiana.getFullYear(), fechaColombiana.getMonth(), fechaColombiana.getDate());
+    const startOfWeek = new Date(startOfToday);
+    startOfWeek.setDate(startOfWeek.getDate() - 6); // Últimos 7 días
+
+    const startOfMonth = new Date(fechaColombiana.getFullYear(), fechaColombiana.getMonth(), 1);
+
     const ventas = await ventasCol.find({}).toArray();
 
-    const filtrarPorRango = (fechaInicio) => ventas.filter(v => new Date(v.fecha) >= fechaInicio);
+    const filtrarPorRango = (fechaInicio) =>
+      ventas.filter(v => new Date(v.fecha) >= fechaInicio);
 
-    const sumarTotal = (ventas) => ventas.reduce((acc, v) => acc + v.totalVenta, 0);
+    const sumarTotal = (ventas) =>
+      ventas.reduce((acc, v) => acc + v.totalVenta, 0);
 
     const ventasDiarias = filtrarPorRango(startOfToday);
     const ventasSemanales = filtrarPorRango(startOfWeek);
     const ventasMensuales = filtrarPorRango(startOfMonth);
 
+    // Formato local colombiano
+    const formatter = new Intl.DateTimeFormat("es-CO", {
+      timeZone: "America/Bogota",
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+
     const dailySales = ventasDiarias.map(v => ({
-      date: new Date(v.fecha).toISOString().split('T')[0],
+      date: formatter.format(new Date(v.fecha)),
       total: v.totalVenta
     }));
 
@@ -1134,7 +1153,6 @@ const getDashboardData = async (req, res) => {
       });
     });
 
-    // Buscar detalles del producto en productosCol
     const topProducts = await Promise.all(
       Object.entries(conteoProductos)
         .sort((a, b) => b[1].cantidad - a[1].cantidad)
@@ -1150,8 +1168,10 @@ const getDashboardData = async (req, res) => {
         })
     );
 
-    // Buscar productos con stock bajo
-    const lowStockItemsCursor = await inventarioCol.find({ $expr: { $lte: ["$stock", "$minStock"] } }).sort({ stock: 1 }).toArray();
+    const lowStockItemsCursor = await inventarioCol
+      .find({ $expr: { $lte: ["$stock", "$minStock"] } })
+      .sort({ stock: 1 })
+      .toArray();
 
     const lowStockItems = lowStockItemsCursor.map(item => ({
       id: item.code,
@@ -1160,6 +1180,8 @@ const getDashboardData = async (req, res) => {
       minStock: item.minStock,
       category: item.category,
       lastUpdate: item.lastUpdate
+        ? formatter.format(new Date(item.lastUpdate))
+        : null
     }));
 
     res.status(200).json({
@@ -1185,6 +1207,7 @@ const getDashboardData = async (req, res) => {
     });
   }
 };
+
 
 const getUsers = async (req, res) => {
   try {
