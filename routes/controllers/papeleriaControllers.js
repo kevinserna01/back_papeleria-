@@ -1102,26 +1102,30 @@ const getDashboardData = async (req, res) => {
     const productosCol = db.collection('productos');
     const inventarioCol = db.collection('inventario');
 
-    const getColombianDate = () => {
-      const utc = new Date();
-      const colombiaTime = utc.toLocaleString("en-US", { timeZone: "America/Bogota" });
-      return new Date(colombiaTime);
-    };
+    // Calcular fechas con zona horaria colombiana
+    const colombianNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Bogota" }));
+    const startOfToday = new Date(colombianNow.getFullYear(), colombianNow.getMonth(), colombianNow.getDate());
 
-    const getStartOfColombianDay = () => {
-      const date = getColombianDate();
-      return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    };
+    // Obtener inicio de semana (domingo)
+    const dayOfWeek = colombianNow.getDay(); // 0=domingo, 6=sábado
+    const startOfWeek = new Date(colombianNow);
+    startOfWeek.setDate(colombianNow.getDate() - dayOfWeek);
+    startOfWeek.setHours(0, 0, 0, 0);
 
-    const now = getColombianDate();
-    const startOfToday = getStartOfColombianDay();
-    const startOfWeek = new Date(startOfToday);
-    startOfWeek.setDate(startOfWeek.getDate() - 6);
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Obtener inicio de mes
+    const startOfMonth = new Date(colombianNow.getFullYear(), colombianNow.getMonth(), 1);
 
+    // Traer ventas
     const ventas = await ventasCol.find({}).toArray();
 
-    const filtrarPorRango = (fechaInicio) => ventas.filter(v => new Date(v.fecha) >= fechaInicio);
+    // Convertidor de fecha UTC a Date en horario colombiano
+    const toColombianDate = (utcDateStr) => {
+      return new Date(new Date(utcDateStr).toLocaleString("en-US", { timeZone: "America/Bogota" }));
+    };
+
+    const filtrarPorRango = (fechaInicio) => {
+      return ventas.filter(v => toColombianDate(v.fecha) >= fechaInicio);
+    };
 
     const sumarTotal = (ventas) => ventas.reduce((acc, v) => acc + v.totalVenta, 0);
 
@@ -1129,25 +1133,23 @@ const getDashboardData = async (req, res) => {
     const ventasSemanales = filtrarPorRango(startOfWeek);
     const ventasMensuales = filtrarPorRango(startOfMonth);
 
-    const formatearFechaColombiana = (fechaISO) => {
-      const fecha = new Date(fechaISO);
-      return fecha.toLocaleString("es-CO", {
-        timeZone: "America/Bogota",
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        hour: "numeric",
-        minute: "numeric",
-        hour12: true
-      });
-    };
+    const dailySales = ventasDiarias.map(v => {
+      const dateCol = toColombianDate(v.fecha);
+      return {
+        date: dateCol.toLocaleString("es-CO", {
+          weekday: "long",
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true
+        }),
+        total: v.totalVenta
+      };
+    });
 
-    const dailySales = ventasDiarias.map(v => ({
-      date: formatearFechaColombiana(v.fecha),
-      total: v.totalVenta
-    }));
-
+    // Agrupar productos vendidos
     const conteoProductos = {};
     ventas.forEach(v => {
       v.productos.forEach(p => {
@@ -1158,6 +1160,7 @@ const getDashboardData = async (req, res) => {
       });
     });
 
+    // Obtener detalles del producto
     const topProducts = await Promise.all(
       Object.entries(conteoProductos)
         .sort((a, b) => b[1].cantidad - a[1].cantidad)
@@ -1173,19 +1176,32 @@ const getDashboardData = async (req, res) => {
         })
     );
 
-    const lowStockItemsCursor = await inventarioCol
-      .find({ $expr: { $lte: ["$stock", "$minStock"] } })
-      .sort({ stock: 1 })
-      .toArray();
+    // Productos con bajo stock
+    const lowStockItemsCursor = await inventarioCol.find({
+      $expr: { $lte: ["$stock", "$minStock"] }
+    }).sort({ stock: 1 }).toArray();
 
-    const lowStockItems = lowStockItemsCursor.map(item => ({
-      id: item.code,
-      name: item.name,
-      stock: item.stock,
-      minStock: item.minStock,
-      category: item.category,
-      lastUpdate: formatearFechaColombiana(item.lastUpdate)
-    }));
+    const lowStockItems = lowStockItemsCursor.map(item => {
+      const lastUpdateCol = item.lastUpdate
+        ? toColombianDate(item.lastUpdate).toLocaleString("es-CO", {
+            weekday: "long",
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true
+          })
+        : null;
+      return {
+        id: item.code,
+        name: item.name,
+        stock: item.stock,
+        minStock: item.minStock,
+        category: item.category,
+        lastUpdate: lastUpdateCol
+      };
+    });
 
     res.status(200).json({
       status: "Success",
@@ -1210,6 +1226,7 @@ const getDashboardData = async (req, res) => {
     });
   }
 };
+
 
 
 const getUsers = async (req, res) => {
