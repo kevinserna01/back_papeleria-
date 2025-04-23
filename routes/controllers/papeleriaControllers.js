@@ -1075,21 +1075,14 @@ const loginadmin = async (req, res) => {
       });
     }
 
-    // Generar token con el _id y el rol
-    const token = jwt.sign(
-      {
-        adminId: admin._id,
-        correo: admin.correo,
-        role: 'admin'
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: '1d' }
-    );
-
     return res.status(200).json({
       status: "Success",
       message: "Login exitoso",
-      token
+      admin: {
+        id: admin._id,
+        correo: admin.correo,
+        role: 'admin'
+      }
     });
 
   } catch (error) {
