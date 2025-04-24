@@ -900,13 +900,13 @@ const getReportsData = async (req, res) => {
     });
   }
 };
-
 const getSpecificDayReport = async (req, res) => {
   try {
     const db = await getDb();
     const ventasCol = db.collection('ventas');
 
     const dateParam = req.query.startDate || req.query.date;
+    const format = req.query.format;
 
     if (!dateParam) {
       return res.status(400).json({
@@ -914,18 +914,13 @@ const getSpecificDayReport = async (req, res) => {
         message: 'Debe proporcionar una fecha específica (startDate o date).'
       });
     }
+
     const dayStart = moment.tz(dateParam, 'America/Bogota').startOf('day').toDate();
     const dayEnd = moment.tz(dateParam, 'America/Bogota').endOf('day').toDate();
-    const query = {
-      fecha: {
-        $gte: dayStart,
-        $lte: dayEnd
-      }
-    };
+    const query = { fecha: { $gte: dayStart, $lte: dayEnd } };
 
     const ventas = await ventasCol.find(query).toArray();
 
-    // 🧾 Ventas detalladas
     const resumen = ventas.map(v => ({
       Código: v.code,
       Cliente: v.cliente?.nombre || 'Sin cliente',
@@ -934,14 +929,10 @@ const getSpecificDayReport = async (req, res) => {
       Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
     }));
 
-    // 💰 Total de ventas
-    const total = [
-      {
-        TotalVentas: ventas.reduce((sum, v) => sum + v.totalVenta, 0)
-      }
-    ];
+    const total = [{
+      TotalVentas: ventas.reduce((sum, v) => sum + v.totalVenta, 0)
+    }];
 
-    // 🔝 Productos top vendidos
     const productosVendidos = {};
     ventas.forEach(v => {
       v.productos?.forEach(p => {
@@ -953,9 +944,7 @@ const getSpecificDayReport = async (req, res) => {
       .map(([name, cantidad]) => ({ Producto: name, Cantidad: cantidad }))
       .sort((a, b) => b.Cantidad - a.Cantidad);
 
-    // 📊 Categorías
     const categoriasMap = {};
-
     ventas.forEach(v => {
       v.productos?.forEach(p => {
         const cat = p.categoria || 'Sin categoría';
@@ -973,17 +962,71 @@ const getSpecificDayReport = async (req, res) => {
 
     const categorias = Object.values(categoriasMap);
 
-    // ✅ Respuesta
-    res.status(200).json({
-      status: 'Success',
-      message: 'Reporte completo generado.',
-      data: {
-        ventas: resumen,
-        total,
-        top,
-        categorias
-      }
-    });
+    const data = {
+      ventas: resumen,
+      total,
+      top,
+      categorias
+    };
+
+    if (format === 'pdf') {
+      const doc = new PDFDocument();
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename=reporte-dia.pdf`);
+      doc.pipe(res);
+
+      doc.fontSize(18).text(`Reporte del día ${dateParam}`, { align: 'center' });
+      doc.moveDown();
+
+      const appendSection = (title, rows) => {
+        doc.fontSize(16).text(`🔸 ${title}`, { underline: true });
+        doc.moveDown(0.5);
+        rows.forEach(row => {
+          Object.entries(row).forEach(([key, val]) => {
+            doc.fontSize(12).text(`${key}: ${val}`);
+          });
+          doc.moveDown();
+        });
+        doc.addPage();
+      };
+
+      appendSection('Ventas', resumen);
+      appendSection('Totales', total);
+      appendSection('Top productos', top);
+      appendSection('Categorías', categorias);
+
+      doc.end();
+    } else if (format === 'excel') {
+      const workbook = new ExcelJS.Workbook();
+
+      const addSheet = (name, rows) => {
+        const sheet = workbook.addWorksheet(name);
+        if (rows.length > 0) {
+          sheet.columns = Object.keys(rows[0]).map(k => ({
+            header: k,
+            key: k,
+            width: 20
+          }));
+          sheet.addRows(rows);
+        }
+      };
+
+      addSheet('Ventas', resumen);
+      addSheet('Totales', total);
+      addSheet('Top Productos', top);
+      addSheet('Categorías', categorias);
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename=reporte-dia.xlsx`);
+      await workbook.xlsx.write(res);
+      res.end();
+    } else {
+      res.status(200).json({
+        status: 'Success',
+        message: 'Reporte completo generado.',
+        data
+      });
+    }
 
   } catch (error) {
     console.error('Error generando el reporte del día:', error);
@@ -994,6 +1037,7 @@ const getSpecificDayReport = async (req, res) => {
     });
   }
 };
+
 
 
 
