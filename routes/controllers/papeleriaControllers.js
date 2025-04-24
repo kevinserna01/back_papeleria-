@@ -2,6 +2,7 @@ const CryptoJS = require('crypto-js');
 const moment = require('moment-timezone');
 const PDFDocument = require('pdfkit');
 const ExcelJS = require('exceljs');
+const fs = require('fs');
 const { ObjectId } = require('mongodb');
 const { getDb }  = require('../../database/mongo'); 
 
@@ -1498,6 +1499,81 @@ const loginUser = async (req, res) => {
   }
 };
 
+const exportReportPDF = async (req, res) => {
+  try {
+    const { resumen, total, top, categorias, images } = req.body;
+
+    const dateNow = moment().tz('America/Bogota').format('YYYY-MM-DD_HH-mm');
+    const filename = `reporte-${dateNow}.pdf`;
+
+    const doc = new PDFDocument({ autoFirstPage: false });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
+    doc.pipe(res);
+
+    // Nueva página principal
+    doc.addPage();
+    doc.fontSize(20).text(`📊 Reporte generado - ${dateNow}`, { align: 'center' });
+    doc.moveDown(2);
+
+    // Agregar imágenes si existen
+    const sectionTitles = {
+      daily: '📆 Ventas Diarias',
+      weekly: '🗓️ Ventas Semanales',
+      monthly: '📅 Ventas Mensuales',
+      yearly: '📈 Ventas Anuales',
+      category: '📊 Ventas por Categoría'
+    };
+
+    for (const [key, label] of Object.entries(sectionTitles)) {
+      const imgData = images?.[key];
+      if (imgData) {
+        doc.addPage();
+        doc.fontSize(16).text(label, { align: 'center' });
+        doc.moveDown(1);
+        const imgBuffer = Buffer.from(imgData.split(',')[1], 'base64');
+        const pageWidth = doc.page.width;
+        const pageHeight = doc.page.height;
+        const margin = 40;
+        const maxWidth = pageWidth - margin * 2;
+        const maxHeight = pageHeight - 200;
+
+        doc.image(imgBuffer, {
+          fit: [maxWidth, maxHeight],
+          align: 'center',
+          valign: 'center'
+        });
+      }
+    }
+
+    const appendSection = (title, rows) => {
+      doc.addPage();
+      doc.fontSize(16).text(`🔸 ${title}`, { underline: true });
+      doc.moveDown(0.5);
+      rows.forEach(row => {
+        Object.entries(row).forEach(([key, val]) => {
+          doc.fontSize(12).text(`${key}: ${val}`);
+        });
+        doc.moveDown();
+      });
+    };
+
+    if (resumen?.length) appendSection('Ventas', resumen);
+    if (total?.length) appendSection('Totales', total);
+    if (top?.length) appendSection('Top productos', top);
+    if (categorias?.length) appendSection('Categorías', categorias);
+
+    doc.end();
+  } catch (error) {
+    console.error('Error exportando reporte con imágenes:', error);
+    res.status(500).json({
+      status: 'Error',
+      message: 'No se pudo exportar el reporte en PDF.',
+      error: error.message
+    });
+  }
+};
+
 
 
 
@@ -1532,6 +1608,7 @@ module.exports = {
     createUser,
     updateUser,
     loginUser,
+    exportReportPDF
     
     
 };
