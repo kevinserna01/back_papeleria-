@@ -1401,25 +1401,36 @@ const loginUser = async (req, res) => {
 
     let user = await db.collection('usuarios').findOne({ email });
 
-    if (!user) {
-      const admin = await db.collection('administradores').findOne({ correo: email });
-      if (admin) {
-        user = {
-          _id: admin._id,
-          name: 'Administrador',
-          email: admin.correo,
-          password: admin.password,
-          role: 'admin',
-          status: 'active'
-        };
+    if (user) {
+      if (user.password !== hashedPassword) {
+        return res.status(401).json({
+          status: "Error",
+          message: "Credenciales inválidas"
+        });
       }
-    }
 
-    if (!user || user.password !== hashedPassword) {
-      return res.status(401).json({
-        status: "Error",
-        message: "Credenciales inválidas"
-      });
+      if (user.status !== 'active') {
+        return res.status(403).json({
+          status: "Error",
+          message: "Usuario inactivo. Contacta con el administrador."
+        });
+      }
+
+    } else {
+      const admin = await db.collection('administradores').findOne({ correo: email });
+      if (!admin || admin.password !== hashedPassword) {
+        return res.status(401).json({
+          status: "Error",
+          message: "Credenciales inválidas"
+        });
+      }
+
+      user = {
+        _id: admin._id,
+        name: 'Administrador',
+        email: admin.correo,
+        role: 'admin'
+      };
     }
 
     return res.status(200).json({
@@ -1442,7 +1453,6 @@ const loginUser = async (req, res) => {
     });
   }
 };
-
 
 
 
