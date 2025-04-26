@@ -10,6 +10,7 @@ const corsOptions = {
     origin: [
       'http://localhost:5173', // Para desarrollo local
       'https://back-papeleria-two.vercel.app', // Para producción
+      'https://react-cabina.vercel.app', // Nuevo frontend permitido
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
