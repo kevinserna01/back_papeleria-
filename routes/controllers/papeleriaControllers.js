@@ -1574,7 +1574,51 @@ const exportReportPDF = async (req, res) => {
   }
 };
 
+const deleteUser = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { id } = req.params;
 
+    if (!id) {
+      return res.status(400).json({
+        status: 'Error',
+        message: 'ID de usuario no proporcionado.'
+      });
+    }
+
+    // Buscar el usuario primero
+    const user = await db.collection('usuarios').findOne({ _id: new ObjectId(id) });
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'Error',
+        message: 'Usuario no encontrado.'
+      });
+    }
+
+    // Insertarlo en historial
+    await db.collection('usuariosHistorial').insertOne({
+      ...user,
+      deletedAt: new Date()
+    });
+
+    // Eliminar de la colección principal
+    await db.collection('usuarios').deleteOne({ _id: new ObjectId(id) });
+
+    return res.status(200).json({
+      status: 'Success',
+      message: 'Usuario movido a historial y eliminado correctamente.'
+    });
+
+  } catch (error) {
+    console.error('Error moviendo usuario a historial:', error);
+    return res.status(500).json({
+      status: 'Error',
+      message: 'Error interno del servidor.',
+      error: error.message
+    });
+  }
+};
 
 
 
@@ -1608,7 +1652,7 @@ module.exports = {
     createUser,
     updateUser,
     loginUser,
-    exportReportPDF
-    
+    exportReportPDF,
+    deleteUser
     
 };
