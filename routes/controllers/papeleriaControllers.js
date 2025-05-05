@@ -1643,6 +1643,33 @@ const deleteUser = async (req, res) => {
     });
   }
 };
+const searchCustomersapi = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { documento } = req.body;
+
+    if (!documento || typeof documento !== 'string') {
+      return res.status(400).json({ message: "El campo 'documento' es obligatorio y debe ser una cadena." });
+    }
+
+    const clientes = await db.collection('clientes').find({
+      documento: { $regex: documento, $options: 'i' }
+    }).toArray();
+
+    const resultado = clientes.map(c => ({
+      id: c._id.toString(),
+      nombre: c.nombre,
+      documento: c.documento,
+      email: c.email,
+      telefono: c.telefono
+    }));
+
+    res.status(200).json(resultado);
+  } catch (error) {
+    console.error('Error al buscar clientes:', error);
+    res.status(500).json({ message: 'Error interno al buscar clientes.' });
+  }
+};
 
 
 
@@ -1677,6 +1704,7 @@ module.exports = {
     updateUser,
     loginUser,
     exportReportPDF,
-    deleteUser
+    deleteUser,
+    searchCustomersapi
     
 };
