@@ -526,9 +526,7 @@ const createSale = async (req, res) => {
   cliente // { name, document, email, phone }
   } = req.body;
   
-  php
-  Copiar
-  Editar
+  
   if (!code || typeof code !== 'string') {
     return res.status(400).json({
       status: "Error",
