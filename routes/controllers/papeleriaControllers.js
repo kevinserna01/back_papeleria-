@@ -115,19 +115,34 @@ const newProduct = async (req, res) => {
   try {
     const db = await getDb();
 
-    const { name, code, price = 0, category, description = '' } = req.body;
+    const { 
+      name, 
+      code, 
+      costPrice = 0, 
+      salePrice = 0, 
+      category, 
+      description = '',
+      createNewCategory = false
+    } = req.body;
 
-    if (!name || !code || !category) {
+    if (!name || !code) {
       return res.status(400).json({
         status: "Error",
-        message: "Faltan campos obligatorios (name, code o category)."
+        message: "Los campos name y code son obligatorios."
       });
     }
 
-    if (price < 0) {
+    if (costPrice < 0 || salePrice < 0) {
       return res.status(400).json({
         status: "Error",
-        message: "El precio no puede ser negativo."
+        message: "Los precios no pueden ser negativos."
+      });
+    }
+
+    if (salePrice < costPrice) {
+      return res.status(400).json({
+        status: "Error",
+        message: "El precio de venta no puede ser menor al precio de costo."
       });
     }
 
@@ -139,12 +154,37 @@ const newProduct = async (req, res) => {
       });
     }
 
+    // Manejar categoría
+    let finalCategory = category;
+    if (createNewCategory && category) {
+      // Verificar si la categoría ya existe
+      const existingCategory = await db.collection('categorias').findOne({ 
+        name: { $regex: new RegExp(`^${category}$`, 'i') } 
+      });
+      
+      if (!existingCategory) {
+        // Crear nueva categoría
+        const newCategory = {
+          name: category,
+          description: `Categoría creada automáticamente para ${name}`,
+          createdAt: new Date(),
+          lastUpdate: new Date()
+        };
+        await db.collection('categorias').insertOne(newCategory);
+      }
+    }
+
+    // Calcular margen de ganancia
+    const profitMargin = costPrice > 0 ? ((salePrice - costPrice) / costPrice * 100) : 0;
+
     const newProduct = {
       name,
       code,
-      price,
-      category,
+      costPrice: Number(costPrice),
+      salePrice: Number(salePrice),
+      category: finalCategory || 'Sin categoría',
       description,
+      profitMargin: Number(profitMargin.toFixed(2)),
       createdAt: new Date(),
       lastUpdate: new Date()
     };
@@ -204,7 +244,15 @@ const updateProduct = async (req, res) => {
   try {
     const db = await getDb();
 
-    const { code, name, price, category, description } = req.body;
+    const { 
+      code, 
+      name, 
+      costPrice, 
+      salePrice, 
+      category, 
+      description,
+      createNewCategory = false
+    } = req.body;
 
     if (!code) {
       return res.status(400).json({
@@ -222,11 +270,62 @@ const updateProduct = async (req, res) => {
       });
     }
 
+    // Validaciones de precios
+    if (costPrice !== undefined && costPrice < 0) {
+      return res.status(400).json({
+        status: "Error",
+        message: "El precio de costo no puede ser negativo."
+      });
+    }
+
+    if (salePrice !== undefined && salePrice < 0) {
+      return res.status(400).json({
+        status: "Error",
+        message: "El precio de venta no puede ser negativo."
+      });
+    }
+
+    // Validar que el precio de venta no sea menor al de costo
+    const finalCostPrice = costPrice !== undefined ? costPrice : existingProduct.costPrice;
+    const finalSalePrice = salePrice !== undefined ? salePrice : existingProduct.salePrice;
+    
+    if (finalSalePrice < finalCostPrice) {
+      return res.status(400).json({
+        status: "Error",
+        message: "El precio de venta no puede ser menor al precio de costo."
+      });
+    }
+
+    // Manejar categoría
+    let finalCategory = category || existingProduct.category;
+    if (createNewCategory && category) {
+      // Verificar si la categoría ya existe
+      const existingCategory = await db.collection('categorias').findOne({ 
+        name: { $regex: new RegExp(`^${category}$`, 'i') } 
+      });
+      
+      if (!existingCategory) {
+        // Crear nueva categoría
+        const newCategory = {
+          name: category,
+          description: `Categoría creada automáticamente para ${name || existingProduct.name}`,
+          createdAt: new Date(),
+          lastUpdate: new Date()
+        };
+        await db.collection('categorias').insertOne(newCategory);
+      }
+    }
+
+    // Calcular margen de ganancia
+    const profitMargin = finalCostPrice > 0 ? ((finalSalePrice - finalCostPrice) / finalCostPrice * 100) : 0;
+
     const updatedFields = {
       ...(name && { name }),
-      ...(price !== undefined && { price }),
-      ...(category && { category }),
-      ...(description && { description }),
+      ...(costPrice !== undefined && { costPrice: Number(costPrice) }),
+      ...(salePrice !== undefined && { salePrice: Number(salePrice) }),
+      ...(category && { category: finalCategory }),
+      ...(description !== undefined && { description }),
+      profitMargin: Number(profitMargin.toFixed(2)),
       lastUpdate: new Date()
     };
 
@@ -496,7 +595,9 @@ const getProductsWithStock = async (req, res) => {
         code: p.code,
         nombre: p.name,
         categoria: p.category,
-        precio: p.price,
+        precio: p.salePrice || p.price, // Usar salePrice si existe, sino price
+        precioCosto: p.costPrice || 0,
+        margenGanancia: p.profitMargin || 0,
         stock: stockMap[p.code]
       }));
 
@@ -516,152 +617,368 @@ const getProductsWithStock = async (req, res) => {
   }
 };
 
-const createSale = async (req, res) => {
+/*---------------------------------GESTION_DE_CATEGORIAS--------------------------------------------------------------*/
+
+const createCategory = async (req, res) => {
   try {
-  const db = await getDb();
-  const {
-  code,
-  productos,
-  metodoPago,
-  cliente // { name, document, email, phone }
-  } = req.body;
-  
-  
-  if (!code || typeof code !== 'string') {
-    return res.status(400).json({
-      status: "Error",
-      message: "Debe proporcionar un código único para la venta (code)."
-    });
-  }
-  
-  if (!productos || !Array.isArray(productos) || productos.length === 0) {
-    return res.status(400).json({
-      status: "Error",
-      message: "Debe proporcionar al menos un producto para la venta."
-    });
-  }
-  
-  if (!metodoPago || !['Efectivo', 'Nequi', 'Transferencia'].includes(metodoPago)) {
-    return res.status(400).json({
-      status: "Error",
-      message: "Debe especificar un método de pago válido."
-    });
-  }
-  
-  const ventasCol = db.collection('ventas');
-  const inventarioCol = db.collection('inventario');
-  const productosCol = db.collection('productos');
-  const clientesCol = db.collection('clientes');
-  
-  // Verificar si ya existe una venta con ese código
-  const ventaExistente = await ventasCol.findOne({ code });
-  if (ventaExistente) {
-    return res.status(409).json({
-      status: "Error",
-      message: "Ya existe una venta con ese código."
-    });
-  }
-  
-  let totalVenta = 0;
-  const detalleVenta = [];
-  
-  for (const item of productos) {
-    const { code: productCode, cantidad } = item;
-  
-    if (!productCode || cantidad <= 0) {
+    const db = await getDb();
+    const { name, description = '' } = req.body;
+
+    if (!name) {
       return res.status(400).json({
         status: "Error",
-        message: "Código de producto inválido o cantidad no válida."
+        message: "El nombre de la categoría es obligatorio."
       });
     }
-  
-    const prodInventario = await inventarioCol.findOne({ code: productCode });
-    const prodInfo = await productosCol.findOne({ code: productCode });
-  
-    if (!prodInventario || !prodInfo) {
-      return res.status(404).json({
-        status: "Error",
-        message: `El producto con código ${productCode} no existe en inventario o productos.`
-      });
-    }
-  
-    if (prodInventario.stock < cantidad) {
+
+    // Verificar si la categoría ya existe
+    const existingCategory = await db.collection('categorias').findOne({ 
+      name: { $regex: new RegExp(`^${name}$`, 'i') } 
+    });
+
+    if (existingCategory) {
       return res.status(409).json({
         status: "Error",
-        message: `No hay suficiente stock para el producto ${prodInfo.name}.`
+        message: "Ya existe una categoría con ese nombre."
       });
     }
-  
-    const subtotal = prodInfo.price * cantidad;
-    totalVenta += subtotal;
-  
-    detalleVenta.push({
-      code: prodInfo.code,
-      name: prodInfo.name,
-      categoria: prodInfo.category,
-      cantidad,
-      precioUnitario: prodInfo.price,
-      total: subtotal
+
+    const newCategory = {
+      name,
+      description,
+      createdAt: new Date(),
+      lastUpdate: new Date()
+    };
+
+    await db.collection('categorias').insertOne(newCategory);
+
+    return res.status(201).json({
+      status: "Success",
+      message: "Categoría creada correctamente.",
+      data: newCategory
     });
-  
-    await inventarioCol.updateOne(
-      { code: productCode },
-      { $inc: { stock: -cantidad }, $set: { lastUpdate: new Date() } }
-    );
+
+  } catch (error) {
+    console.error('Error al crear categoría:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno del servidor",
+      error: error.message
+    });
   }
-  
-  // Guardar cliente si es válido y no existe
-  let clienteGuardado = null;
-  
-  if (
-    cliente &&
-    typeof cliente.name === 'string' &&
-    typeof cliente.document === 'string' &&
-    typeof cliente.email === 'string' &&
-    typeof cliente.phone === 'string'
-  ) {
-    const existente = await clientesCol.findOne({ document: cliente.document });
-    if (!existente) {
-      await clientesCol.insertOne({
-        name: cliente.name,
-        document: cliente.document,
-        email: cliente.email,
-        phone: cliente.phone,
-        createdAt: new Date()
+};
+
+const getCategories = async (req, res) => {
+  try {
+    const db = await getDb();
+
+    const categorias = await db.collection('categorias')
+      .find({})
+      .sort({ name: 1 })
+      .toArray();
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Categorías obtenidas correctamente.",
+      data: categorias
+    });
+
+  } catch (error) {
+    console.error('Error al obtener categorías:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al obtener las categorías.",
+      error: error.message
+    });
+  }
+};
+
+const updateCategory = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { id } = req.params;
+    const { name, description } = req.body;
+
+    if (!id) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de la categoría es requerido."
       });
     }
-    clienteGuardado = cliente;
-  }
-  
-  const horaColombia = require('moment-timezone')().tz('America/Bogota').format('HH:mm:ss');
-  
-  const venta = {
-    code,
-    fecha: new Date(),
-    hora: horaColombia,
-    cliente: clienteGuardado,
-    productos: detalleVenta,
-    totalVenta,
-    metodoPago,
-    createdAt: new Date()
-  };
-  
-  await ventasCol.insertOne(venta);
-  
-  res.status(201).json({
-    status: "Success",
-    message: "Venta registrada correctamente.",
-    data: venta
-  });
+
+    if (!name) {
+      return res.status(400).json({
+        status: "Error",
+        message: "El nombre de la categoría es obligatorio."
+      });
+    }
+
+    const existingCategory = await db.collection('categorias').findOne({ _id: new ObjectId(id) });
+    if (!existingCategory) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Categoría no encontrada."
+      });
+    }
+
+    // Verificar si el nuevo nombre ya existe en otra categoría
+    const duplicateCategory = await db.collection('categorias').findOne({ 
+      name: { $regex: new RegExp(`^${name}$`, 'i') },
+      _id: { $ne: new ObjectId(id) }
+    });
+
+    if (duplicateCategory) {
+      return res.status(409).json({
+        status: "Error",
+        message: "Ya existe otra categoría con ese nombre."
+      });
+    }
+
+    const updateFields = {
+      name,
+      ...(description !== undefined && { description }),
+      lastUpdate: new Date()
+    };
+
+    await db.collection('categorias').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateFields }
+    );
+
+    const updatedCategory = await db.collection('categorias').findOne({ _id: new ObjectId(id) });
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Categoría actualizada correctamente.",
+      data: updatedCategory
+    });
+
   } catch (error) {
-  console.error("Error al registrar la venta:", error);
-  res.status(500).json({
-  status: "Error",
-  message: "Error interno al registrar la venta.",
-  error: error.message
-  });
+    console.error('Error al actualizar categoría:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al actualizar la categoría.",
+      error: error.message
+    });
   }
-  };
+};
+
+const deleteCategory = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de la categoría es requerido."
+      });
+    }
+
+    const category = await db.collection('categorias').findOne({ _id: new ObjectId(id) });
+    if (!category) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Categoría no encontrada."
+      });
+    }
+
+    // Verificar si hay productos usando esta categoría
+    const productsUsingCategory = await db.collection('productos').countDocuments({ 
+      category: category.name 
+    });
+
+    if (productsUsingCategory > 0) {
+      return res.status(400).json({
+        status: "Error",
+        message: `No se puede eliminar la categoría porque ${productsUsingCategory} producto(s) la están usando.`
+      });
+    }
+
+    await db.collection('categorias').deleteOne({ _id: new ObjectId(id) });
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Categoría eliminada correctamente."
+    });
+
+  } catch (error) {
+    console.error('Error al eliminar categoría:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al eliminar la categoría.",
+      error: error.message
+    });
+  }
+};
+
+const createSale = async (req, res) => {
+  try {
+    const db = await getDb();
+    const {
+      code,
+      productos,
+      metodoPago,
+      cliente, // { name, document, email, phone }
+      trabajador // { correo, nombre }
+    } = req.body;
+    
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({
+        status: "Error",
+        message: "Debe proporcionar un código único para la venta (code)."
+      });
+    }
+    
+    if (!productos || !Array.isArray(productos) || productos.length === 0) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Debe proporcionar al menos un producto para la venta."
+      });
+    }
+    
+    if (!metodoPago || !['Efectivo', 'Nequi', 'Transferencia'].includes(metodoPago)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Debe especificar un método de pago válido."
+      });
+    }
+    
+    const ventasCol = db.collection('ventas');
+    const inventarioCol = db.collection('inventario');
+    const productosCol = db.collection('productos');
+    const clientesCol = db.collection('clientes');
+    const trabajadoresCol = db.collection('trabajadores');
+    
+    // Verificar si ya existe una venta con ese código
+    const ventaExistente = await ventasCol.findOne({ code });
+    if (ventaExistente) {
+      return res.status(409).json({
+        status: "Error",
+        message: "Ya existe una venta con ese código."
+      });
+    }
+    
+    // Validar y obtener información del trabajador
+    let trabajadorInfo = null;
+    if (trabajador && trabajador.correo) {
+      const trabajadorEncontrado = await trabajadoresCol.findOne({ correo: trabajador.correo });
+      if (trabajadorEncontrado) {
+        trabajadorInfo = {
+          correo: trabajadorEncontrado.correo,
+          nombre: trabajadorEncontrado.nombre,
+          cedula: trabajadorEncontrado.cedula
+        };
+      } else {
+        return res.status(404).json({
+          status: "Error",
+          message: "Trabajador no encontrado."
+        });
+      }
+    }
+    
+    let totalVenta = 0;
+    const detalleVenta = [];
+    
+    for (const item of productos) {
+      const { code: productCode, cantidad } = item;
+    
+      if (!productCode || cantidad <= 0) {
+        return res.status(400).json({
+          status: "Error",
+          message: "Código de producto inválido o cantidad no válida."
+        });
+      }
+    
+      const prodInventario = await inventarioCol.findOne({ code: productCode });
+      const prodInfo = await productosCol.findOne({ code: productCode });
+    
+      if (!prodInventario || !prodInfo) {
+        return res.status(404).json({
+          status: "Error",
+          message: `El producto con código ${productCode} no existe en inventario o productos.`
+        });
+      }
+    
+      if (prodInventario.stock < cantidad) {
+        return res.status(409).json({
+          status: "Error",
+          message: `No hay suficiente stock para el producto ${prodInfo.name}.`
+        });
+      }
+    
+      const subtotal = prodInfo.price * cantidad;
+      totalVenta += subtotal;
+    
+      detalleVenta.push({
+        code: prodInfo.code,
+        name: prodInfo.name,
+        categoria: prodInfo.category,
+        cantidad,
+        precioUnitario: prodInfo.price,
+        total: subtotal
+      });
+    
+      await inventarioCol.updateOne(
+        { code: productCode },
+        { $inc: { stock: -cantidad }, $set: { lastUpdate: new Date() } }
+      );
+    }
+    
+    // Guardar cliente si es válido y no existe
+    let clienteGuardado = null;
+    
+    if (
+      cliente &&
+      typeof cliente.name === 'string' &&
+      typeof cliente.document === 'string' &&
+      typeof cliente.email === 'string' &&
+      typeof cliente.phone === 'string'
+    ) {
+      const existente = await clientesCol.findOne({ document: cliente.document });
+      if (!existente) {
+        await clientesCol.insertOne({
+          name: cliente.name,
+          document: cliente.document,
+          email: cliente.email,
+          phone: cliente.phone,
+          createdAt: new Date()
+        });
+      }
+      clienteGuardado = cliente;
+    }
+    
+    const horaColombia = require('moment-timezone')().tz('America/Bogota').format('HH:mm:ss');
+    
+    const venta = {
+      code,
+      fecha: new Date(),
+      hora: horaColombia,
+      cliente: clienteGuardado,
+      trabajador: trabajadorInfo, // NUEVO: Información del trabajador
+      productos: detalleVenta,
+      totalVenta,
+      metodoPago,
+      createdAt: new Date()
+    };
+    
+    await ventasCol.insertOne(venta);
+    
+    res.status(201).json({
+      status: "Success",
+      message: "Venta registrada correctamente.",
+      data: venta
+    });
+  } catch (error) {
+    console.error("Error al registrar la venta:", error);
+    res.status(500).json({
+      status: "Error",
+      message: "Error interno al registrar la venta.",
+      error: error.message
+    });
+  }
+};
+  
 
 const checkAndReserveSaleCode = async (req, res) => {
   try {
@@ -776,18 +1093,48 @@ const getReportsData = async (req, res) => {
   try {
     const db = await getDb();
     const ventasCol = db.collection('ventas');
+    const trabajadoresCol = db.collection('trabajadores');
 
-    const { startDate, endDate, type, format } = req.query;
+    const { 
+      startDate, 
+      endDate, 
+      type, 
+      format,
+      periodo = 'custom', // 'dia', 'semana', 'mes', 'año', 'custom'
+      fechaEspecifica = null // Para filtros específicos
+    } = req.query;
 
-    if (!startDate || !endDate) {
-      return res.status(400).json({
-        status: 'Error',
-        message: 'Debe proporcionar startDate y endDate.'
-      });
+    // Calcular fechas según el período
+    let start, end;
+    const now = moment().tz('America/Bogota');
+
+    if (periodo === 'dia') {
+      const fecha = fechaEspecifica ? moment.tz(fechaEspecifica, 'America/Bogota') : now;
+      start = fecha.startOf('day').toDate();
+      end = fecha.endOf('day').toDate();
+    } else if (periodo === 'semana') {
+      const fecha = fechaEspecifica ? moment.tz(fechaEspecifica, 'America/Bogota') : now;
+      start = fecha.startOf('week').toDate();
+      end = fecha.endOf('week').toDate();
+    } else if (periodo === 'mes') {
+      const fecha = fechaEspecifica ? moment.tz(fechaEspecifica, 'America/Bogota') : now;
+      start = fecha.startOf('month').toDate();
+      end = fecha.endOf('month').toDate();
+    } else if (periodo === 'año') {
+      const fecha = fechaEspecifica ? moment.tz(fechaEspecifica, 'America/Bogota') : now;
+      start = fecha.startOf('year').toDate();
+      end = fecha.endOf('year').toDate();
+    } else {
+      // Período personalizado
+      if (!startDate || !endDate) {
+        return res.status(400).json({
+          status: 'Error',
+          message: 'Para período personalizado debe proporcionar startDate y endDate.'
+        });
+      }
+      start = moment.tz(startDate, 'America/Bogota').startOf('day').toDate();
+      end = moment.tz(endDate, 'America/Bogota').endOf('day').toDate();
     }
-
-    const start = moment.tz(startDate, 'America/Bogota').startOf('day').toDate();
-    const end = moment.tz(endDate, 'America/Bogota').endOf('day').toDate();
 
     const query = {
       fecha: { $gte: start, $lte: end }
@@ -795,91 +1142,504 @@ const getReportsData = async (req, res) => {
 
     const ventas = await ventasCol.find(query).toArray();
 
-    const buildVentas = () =>
-      ventas.map(v => ({
-        Código: v.code,
-        Cliente: v.cliente?.nombre || 'Sin cliente',
-        Total: v.totalVenta,
-        Método: v.metodoPago,
-        Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD hh:mm:ss A')
-      }));
-
-    const buildTotal = () => {
-      const totalVentas = ventas.reduce((sum, v) => sum + v.totalVenta, 0);
-      return [{ TotalVentas: totalVentas }];
+    // Función para obtener información de trabajadores
+    const getTrabajadorInfo = async (correo) => {
+      if (!correo) return { nombre: 'Sistema', correo: 'sistema' };
+      const trabajador = await trabajadoresCol.findOne({ correo });
+      return trabajador ? { nombre: trabajador.nombre, correo: trabajador.correo } : { nombre: 'Desconocido', correo };
     };
 
-    const buildTop = () => {
-      const productosVendidos = {};
+    // 1. VENTAS POR DEPARTAMENTOS
+    const buildVentasPorDepartamentos = () => {
+      const departamentos = {};
+      
       ventas.forEach(v => {
-        v.productos.forEach(p => {
-          productosVendidos[p.name] = (productosVendidos[p.name] || 0) + p.cantidad;
-        });
+        const departamento = v.cliente?.departamento || 'Sin departamento';
+        if (!departamentos[departamento]) {
+          departamentos[departamento] = {
+            departamento,
+            totalVentas: 0,
+            cantidadVentas: 0,
+            clientes: new Set()
+          };
+        }
+        departamentos[departamento].totalVentas += v.totalVenta;
+        departamentos[departamento].cantidadVentas += 1;
+        if (v.cliente?.nombre) {
+          departamentos[departamento].clientes.add(v.cliente.nombre);
+        }
       });
 
-      return Object.entries(productosVendidos)
-        .map(([name, cantidad]) => ({ Producto: name, Cantidad: cantidad }))
-        .sort((a, b) => b.Cantidad - a.Cantidad);
+      return Object.values(departamentos).map(d => ({
+        Departamento: d.departamento,
+        TotalVentas: d.totalVentas,
+        CantidadVentas: d.cantidadVentas,
+        ClientesUnicos: d.clientes.size
+      })).sort((a, b) => b.TotalVentas - a.TotalVentas);
     };
 
-    const buildCategorias = () => {
+    // 2. VENTAS POR CATEGORÍAS
+    const buildVentasPorCategorias = () => {
       const categorias = {};
 
       ventas.forEach(v => {
         v.productos.forEach(p => {
           const categoria = p.categoria || 'Sin categoría';
-
           if (!categorias[categoria]) {
             categorias[categoria] = {
-              cantidad: 0,
-              total: 0
+              categoria,
+              cantidadVendida: 0,
+              totalGenerado: 0,
+              productos: new Set()
             };
           }
-
-          categorias[categoria].cantidad += p.cantidad;
-          categorias[categoria].total += p.precioUnitario * p.cantidad;
+          categorias[categoria].cantidadVendida += p.cantidad;
+          categorias[categoria].totalGenerado += p.precioUnitario * p.cantidad;
+          categorias[categoria].productos.add(p.name);
         });
       });
 
-      return Object.entries(categorias).map(([cat, data]) => ({
-        Categoria: cat,
-        CantidadVendida: data.cantidad,
-        TotalGenerado: data.total || null
-      }));
+      return Object.values(categorias).map(c => ({
+        Categoria: c.categoria,
+        CantidadVendida: c.cantidadVendida,
+        TotalGenerado: c.totalGenerado,
+        ProductosUnicos: c.productos.size
+      })).sort((a, b) => b.TotalGenerado - a.TotalGenerado);
     };
 
-    const tiposValidos = ['ventas', 'total', 'top', 'categorias'];
+    // 3. VENTAS POR MES (desde fecha específica hasta año actual)
+    const buildVentasPorMes = () => {
+      const ventasPorMes = {};
+      const fechaInicio = fechaEspecifica ? moment.tz(fechaEspecifica, 'America/Bogota') : moment().tz('America/Bogota').subtract(1, 'year');
+      const fechaFin = moment().tz('America/Bogota');
 
-    if (!type) {
-      return res.status(200).json({
-        status: 'Success',
-        message: 'Reporte completo generado.',
-        data: {
-          ventas: buildVentas(),
-          total: buildTotal(),
-          top: buildTop(),
-          categorias: buildCategorias()
+      // Obtener todas las ventas desde la fecha de inicio
+      const queryMensual = {
+        fecha: { 
+          $gte: fechaInicio.startOf('month').toDate(), 
+          $lte: fechaFin.endOf('month').toDate() 
         }
+      };
+
+      return ventasCol.find(queryMensual).toArray().then(ventasMensuales => {
+        ventasMensuales.forEach(v => {
+          const mes = moment(v.fecha).tz('America/Bogota').format('YYYY-MM');
+          if (!ventasPorMes[mes]) {
+            ventasPorMes[mes] = {
+              mes,
+              totalVentas: 0,
+              cantidadVentas: 0,
+              clientes: new Set()
+            };
+          }
+          ventasPorMes[mes].totalVentas += v.totalVenta;
+          ventasPorMes[mes].cantidadVentas += 1;
+          if (v.cliente?.nombre) {
+            ventasPorMes[mes].clientes.add(v.cliente.nombre);
+          }
+        });
+
+        return Object.values(ventasPorMes).map(m => ({
+          Mes: m.mes,
+          TotalVentas: m.totalVentas,
+          CantidadVentas: m.cantidadVentas,
+          ClientesUnicos: m.clientes.size
+        })).sort((a, b) => a.Mes.localeCompare(b.Mes));
       });
+    };
+
+    // 4. VENTAS POR TRABAJADOR
+    const buildVentasPorTrabajador = async () => {
+      const trabajadores = {};
+      
+      for (const v of ventas) {
+        const trabajadorInfo = await getTrabajadorInfo(v.trabajador?.correo);
+        const key = trabajadorInfo.correo;
+        
+        if (!trabajadores[key]) {
+          trabajadores[key] = {
+            trabajador: trabajadorInfo.nombre,
+            correo: trabajadorInfo.correo,
+            totalVentas: 0,
+            cantidadVentas: 0,
+            clientes: new Set()
+          };
+        }
+        
+        trabajadores[key].totalVentas += v.totalVenta;
+        trabajadores[key].cantidadVentas += 1;
+        if (v.cliente?.nombre) {
+          trabajadores[key].clientes.add(v.cliente.nombre);
+        }
+      }
+
+      return Object.values(trabajadores).map(t => ({
+        Trabajador: t.trabajador,
+        Correo: t.correo,
+        TotalVentas: t.totalVentas,
+        CantidadVentas: t.cantidadVentas,
+        ClientesAtendidos: t.clientes.size
+      })).sort((a, b) => b.TotalVentas - a.TotalVentas);
+    };
+
+    // 5. PRODUCTOS MÁS VENDIDOS POR CANTIDAD
+    const buildProductosMasVendidosCantidad = () => {
+      const productos = {};
+
+      ventas.forEach(v => {
+        v.productos.forEach(p => {
+          if (!productos[p.name]) {
+            productos[p.name] = {
+              producto: p.name,
+              codigo: p.code,
+              categoria: p.categoria || 'Sin categoría',
+              cantidadVendida: 0,
+              totalGenerado: 0
+            };
+          }
+          productos[p.name].cantidadVendida += p.cantidad;
+          productos[p.name].totalGenerado += p.precioUnitario * p.cantidad;
+        });
+      });
+
+      return Object.values(productos)
+        .sort((a, b) => b.cantidadVendida - a.cantidadVendida)
+        .map(p => ({
+          Producto: p.producto,
+          Codigo: p.codigo,
+          Categoria: p.categoria,
+          CantidadVendida: p.cantidadVendida,
+          TotalGenerado: p.totalGenerado
+        }));
+    };
+
+    // 6. PRODUCTOS MENOS VENDIDOS POR CANTIDAD
+    const buildProductosMenosVendidosCantidad = () => {
+      const productos = {};
+
+      ventas.forEach(v => {
+        v.productos.forEach(p => {
+          if (!productos[p.name]) {
+            productos[p.name] = {
+              producto: p.name,
+              codigo: p.code,
+              categoria: p.categoria || 'Sin categoría',
+              cantidadVendida: 0,
+              totalGenerado: 0
+            };
+          }
+          productos[p.name].cantidadVendida += p.cantidad;
+          productos[p.name].totalGenerado += p.precioUnitario * p.cantidad;
+        });
+      });
+
+      return Object.values(productos)
+        .sort((a, b) => a.cantidadVendida - b.cantidadVendida)
+        .map(p => ({
+          Producto: p.producto,
+          Codigo: p.codigo,
+          Categoria: p.categoria,
+          CantidadVendida: p.cantidadVendida,
+          TotalGenerado: p.totalGenerado
+        }));
+    };
+
+    // 7. PRODUCTOS MÁS VENDIDOS POR TOTAL
+    const buildProductosMasVendidosTotal = () => {
+      const productos = {};
+
+      ventas.forEach(v => {
+        v.productos.forEach(p => {
+          if (!productos[p.name]) {
+            productos[p.name] = {
+              producto: p.name,
+              codigo: p.code,
+              categoria: p.categoria || 'Sin categoría',
+              cantidadVendida: 0,
+              totalGenerado: 0
+            };
+          }
+          productos[p.name].cantidadVendida += p.cantidad;
+          productos[p.name].totalGenerado += p.precioUnitario * p.cantidad;
+        });
+      });
+
+      return Object.values(productos)
+        .sort((a, b) => b.totalGenerado - a.totalGenerado)
+        .map(p => ({
+          Producto: p.producto,
+          Codigo: p.codigo,
+          Categoria: p.categoria,
+          CantidadVendida: p.cantidadVendida,
+          TotalGenerado: p.totalGenerado
+        }));
+    };
+
+    // 8. PRODUCTOS MENOS VENDIDOS POR TOTAL
+    const buildProductosMenosVendidosTotal = () => {
+      const productos = {};
+
+      ventas.forEach(v => {
+        v.productos.forEach(p => {
+          if (!productos[p.name]) {
+            productos[p.name] = {
+              producto: p.name,
+              codigo: p.code,
+              categoria: p.categoria || 'Sin categoría',
+              cantidadVendida: 0,
+              totalGenerado: 0
+            };
+          }
+          productos[p.name].cantidadVendida += p.cantidad;
+          productos[p.name].totalGenerado += p.precioUnitario * p.cantidad;
+        });
+      });
+
+      return Object.values(productos)
+        .sort((a, b) => a.totalGenerado - b.totalGenerado)
+        .map(p => ({
+          Producto: p.producto,
+          Codigo: p.codigo,
+          Categoria: p.categoria,
+          CantidadVendida: p.cantidadVendida,
+          TotalGenerado: p.totalGenerado
+        }));
+    };
+
+    // 9. RESUMEN GENERAL
+    const buildResumenGeneral = () => {
+      const totalVentas = ventas.reduce((sum, v) => sum + v.totalVenta, 0);
+      const cantidadVentas = ventas.length;
+      const clientesUnicos = new Set(ventas.map(v => v.cliente?.nombre).filter(Boolean)).size;
+      const productosVendidos = new Set(ventas.flatMap(v => v.productos.map(p => p.name))).size;
+      const categoriasVendidas = new Set(ventas.flatMap(v => v.productos.map(p => p.categoria || 'Sin categoría'))).size;
+
+      return [{
+        Periodo: periodo,
+        FechaInicio: moment(start).tz('America/Bogota').format('YYYY-MM-DD'),
+        FechaFin: moment(end).tz('America/Bogota').format('YYYY-MM-DD'),
+        TotalVentas: totalVentas,
+        CantidadVentas: cantidadVentas,
+        ClientesUnicos: clientesUnicos,
+        ProductosVendidos: productosVendidos,
+        CategoriasVendidas: categoriasVendidas,
+        PromedioVenta: cantidadVentas > 0 ? (totalVentas / cantidadVentas).toFixed(2) : 0
+      }];
+    };
+
+    // Función para generar reporte completo
+    const generateCompleteReport = async () => {
+      const [
+        ventasPorDepartamentos,
+        ventasPorCategorias,
+        ventasPorMes,
+        ventasPorTrabajador,
+        productosMasVendidosCantidad,
+        productosMenosVendidosCantidad,
+        productosMasVendidosTotal,
+        productosMenosVendidosTotal,
+        resumenGeneral
+      ] = await Promise.all([
+        buildVentasPorDepartamentos(),
+        buildVentasPorCategorias(),
+        buildVentasPorMes(),
+        buildVentasPorTrabajador(),
+        buildProductosMasVendidosCantidad(),
+        buildProductosMenosVendidosCantidad(),
+        buildProductosMasVendidosTotal(),
+        buildProductosMenosVendidosTotal(),
+        buildResumenGeneral()
+      ]);
+
+      return {
+        resumen: resumenGeneral,
+        ventasPorDepartamentos,
+        ventasPorCategorias,
+        ventasPorMes,
+        ventasPorTrabajador,
+        productosMasVendidosCantidad: productosMasVendidosCantidad.slice(0, 20), // Top 20
+        productosMenosVendidosCantidad: productosMenosVendidosCantidad.slice(0, 20), // Top 20
+        productosMasVendidosTotal: productosMasVendidosTotal.slice(0, 20), // Top 20
+        productosMenosVendidosTotal: productosMenosVendidosTotal.slice(0, 20) // Top 20
+      };
+    };
+
+    // Tipos de reporte válidos
+    const tiposValidos = [
+      'completo', 'resumen', 'departamentos', 'categorias', 'mensual', 
+      'trabajadores', 'productos-mas-cantidad', 'productos-menos-cantidad',
+      'productos-mas-total', 'productos-menos-total'
+    ];
+
+    if (!type || type === 'completo') {
+      const reporteCompleto = await generateCompleteReport();
+      
+      if (format === 'pdf') {
+        const doc = new PDFDocument();
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'attachment; filename=reporte-completo.pdf');
+        doc.pipe(res);
+
+        // Portada
+        doc.fontSize(20).text('REPORTE COMPLETO DE VENTAS', { align: 'center' });
+        doc.moveDown();
+        doc.fontSize(12).text(`Período: ${reporteCompleto.resumen[0].FechaInicio} - ${reporteCompleto.resumen[0].FechaFin}`);
+        doc.text(`Tipo: ${reporteCompleto.resumen[0].Periodo}`);
+        doc.moveDown();
+
+        // Resumen
+        doc.fontSize(16).text('RESUMEN GENERAL', { underline: true });
+        doc.moveDown();
+        Object.entries(reporteCompleto.resumen[0]).forEach(([key, value]) => {
+          doc.text(`${key}: ${value}`);
+        });
+        doc.addPage();
+
+        // Ventas por departamentos
+        doc.fontSize(16).text('VENTAS POR DEPARTAMENTOS', { underline: true });
+        doc.moveDown();
+        reporteCompleto.ventasPorDepartamentos.forEach(d => {
+          doc.text(`${d.Departamento}: $${d.TotalVentas.toLocaleString()} (${d.CantidadVentas} ventas)`);
+        });
+        doc.addPage();
+
+        // Ventas por categorías
+        doc.fontSize(16).text('VENTAS POR CATEGORÍAS', { underline: true });
+        doc.moveDown();
+        reporteCompleto.ventasPorCategorias.forEach(c => {
+          doc.text(`${c.Categoria}: $${c.TotalGenerado.toLocaleString()} (${c.CantidadVendida} unidades)`);
+        });
+        doc.addPage();
+
+        // Top productos
+        doc.fontSize(16).text('TOP 20 PRODUCTOS MÁS VENDIDOS (CANTIDAD)', { underline: true });
+        doc.moveDown();
+        reporteCompleto.productosMasVendidosCantidad.forEach((p, i) => {
+          doc.text(`${i + 1}. ${p.Producto}: ${p.CantidadVendida} unidades - $${p.TotalGenerado.toLocaleString()}`);
+        });
+
+        doc.end();
+      } else if (format === 'excel') {
+        const workbook = new ExcelJS.Workbook();
+
+        // Hoja de resumen
+        const resumenSheet = workbook.addWorksheet('Resumen');
+        resumenSheet.addRow(['Métrica', 'Valor']);
+        Object.entries(reporteCompleto.resumen[0]).forEach(([key, value]) => {
+          resumenSheet.addRow([key, value]);
+        });
+
+        // Hoja de departamentos
+        const deptSheet = workbook.addWorksheet('Ventas por Departamentos');
+        deptSheet.columns = [
+          { header: 'Departamento', key: 'departamento', width: 25 },
+          { header: 'Total Ventas', key: 'totalVentas', width: 15 },
+          { header: 'Cantidad Ventas', key: 'cantidadVentas', width: 15 },
+          { header: 'Clientes Únicos', key: 'clientesUnicos', width: 15 }
+        ];
+        reporteCompleto.ventasPorDepartamentos.forEach(d => {
+          deptSheet.addRow({
+            departamento: d.Departamento,
+            totalVentas: d.TotalVentas,
+            cantidadVentas: d.CantidadVentas,
+            clientesUnicos: d.ClientesUnicos
+          });
+        });
+
+        // Hoja de categorías
+        const catSheet = workbook.addWorksheet('Ventas por Categorías');
+        catSheet.columns = [
+          { header: 'Categoría', key: 'categoria', width: 25 },
+          { header: 'Cantidad Vendida', key: 'cantidadVendida', width: 15 },
+          { header: 'Total Generado', key: 'totalGenerado', width: 15 },
+          { header: 'Productos Únicos', key: 'productosUnicos', width: 15 }
+        ];
+        reporteCompleto.ventasPorCategorias.forEach(c => {
+          catSheet.addRow({
+            categoria: c.Categoria,
+            cantidadVendida: c.CantidadVendida,
+            totalGenerado: c.TotalGenerado,
+            productosUnicos: c.ProductosUnicos
+          });
+        });
+
+        // Hoja de top productos
+        const topSheet = workbook.addWorksheet('Top Productos');
+        topSheet.columns = [
+          { header: 'Producto', key: 'producto', width: 30 },
+          { header: 'Código', key: 'codigo', width: 15 },
+          { header: 'Categoría', key: 'categoria', width: 20 },
+          { header: 'Cantidad Vendida', key: 'cantidadVendida', width: 15 },
+          { header: 'Total Generado', key: 'totalGenerado', width: 15 }
+        ];
+        reporteCompleto.productosMasVendidosCantidad.forEach(p => {
+          topSheet.addRow({
+            producto: p.Producto,
+            codigo: p.Codigo,
+            categoria: p.Categoria,
+            cantidadVendida: p.CantidadVendida,
+            totalGenerado: p.TotalGenerado
+          });
+        });
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename=reporte-completo.xlsx');
+        await workbook.xlsx.write(res);
+        res.end();
+      } else {
+        return res.status(200).json({
+          status: 'Success',
+          message: 'Reporte completo generado correctamente.',
+          data: reporteCompleto
+        });
+      }
     }
 
     if (!tiposValidos.includes(type)) {
       return res.status(400).json({
         status: 'Error',
-        message: 'El parámetro "type" debe ser uno de: ventas, total, top, categorias.'
+        message: `El parámetro "type" debe ser uno de: ${tiposValidos.join(', ')}.`
       });
     }
 
+    // Generar reporte específico
     let report = [];
-    if (type === 'ventas') report = buildVentas();
-    if (type === 'total') report = buildTotal();
-    if (type === 'top') report = buildTop();
-    if (type === 'categorias') report = buildCategorias();
+    const reporteCompleto = await generateCompleteReport();
+
+    switch (type) {
+      case 'resumen':
+        report = reporteCompleto.resumen;
+        break;
+      case 'departamentos':
+        report = reporteCompleto.ventasPorDepartamentos;
+        break;
+      case 'categorias':
+        report = reporteCompleto.ventasPorCategorias;
+        break;
+      case 'mensual':
+        report = reporteCompleto.ventasPorMes;
+        break;
+      case 'trabajadores':
+        report = reporteCompleto.ventasPorTrabajador;
+        break;
+      case 'productos-mas-cantidad':
+        report = reporteCompleto.productosMasVendidosCantidad;
+        break;
+      case 'productos-menos-cantidad':
+        report = reporteCompleto.productosMenosVendidosCantidad;
+        break;
+      case 'productos-mas-total':
+        report = reporteCompleto.productosMasVendidosTotal;
+        break;
+      case 'productos-menos-total':
+        report = reporteCompleto.productosMenosVendidosTotal;
+        break;
+    }
 
     if (format === 'pdf') {
       const doc = new PDFDocument();
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename=report-${type}.pdf`);
+      res.setHeader('Content-Disposition', `attachment; filename=reporte-${type}.pdf`);
       doc.pipe(res);
 
       doc.fontSize(18).text(`Reporte: ${type.toUpperCase()}`, { align: 'center' });
@@ -907,11 +1667,15 @@ const getReportsData = async (req, res) => {
       }
 
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename=report-${type}.xlsx`);
+      res.setHeader('Content-Disposition', `attachment; filename=reporte-${type}.xlsx`);
       await workbook.xlsx.write(res);
       res.end();
     } else {
-      res.status(200).json(report);
+      res.status(200).json({
+        status: 'Success',
+        message: `Reporte de ${type} generado correctamente.`,
+        data: report
+      });
     }
 
   } catch (error) {
@@ -1674,6 +2438,1755 @@ const searchCustomersapi = async (req, res) => {
 
 
 
+/*---------------------------------CRUD_CLIENTES_MEJORADO--------------------------------------------------------------*/
+
+const createClient = async (req, res) => {
+  try {
+    const db = await getDb();
+    const {
+      tipoIdentificacion,
+      numeroIdentificacion,
+      nombre,
+      email,
+      telefono,
+      departamento,
+      ciudad,
+      ubicacionLocal,
+      tipoCliente = 'individual',
+      descuentoPersonalizado = 0
+    } = req.body;
+
+    // Validaciones obligatorias
+    if (!tipoIdentificacion || !numeroIdentificacion || !nombre || !email || !telefono) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Los campos tipoIdentificacion, numeroIdentificacion, nombre, email y telefono son obligatorios."
+      });
+    }
+
+    // Validar tipo de identificación
+    const tiposValidos = ['CC', 'NIT', 'CE', 'TI', 'RC', 'PAS'];
+    if (!tiposValidos.includes(tipoIdentificacion)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Tipo de identificación inválido. Debe ser: CC, NIT, CE, TI, RC, PAS"
+      });
+    }
+
+    // Validar email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Formato de email inválido."
+      });
+    }
+
+    // Verificar si ya existe un cliente con el mismo número de identificación
+    const existingClient = await db.collection('clientes').findOne({
+      tipoIdentificacion,
+      numeroIdentificacion
+    });
+
+    if (existingClient) {
+      return res.status(409).json({
+        status: "Error",
+        message: "Ya existe un cliente con este tipo y número de identificación."
+      });
+    }
+
+    // Verificar si ya existe un cliente con el mismo email
+    const existingEmail = await db.collection('clientes').findOne({ email });
+    if (existingEmail) {
+      return res.status(409).json({
+        status: "Error",
+        message: "Ya existe un cliente con este email."
+      });
+    }
+
+    const newClient = {
+      tipoIdentificacion,
+      numeroIdentificacion,
+      nombre,
+      email,
+      telefono,
+      departamento: departamento || '',
+      ciudad: ciudad || '',
+      ubicacionLocal: ubicacionLocal || '',
+      tipoCliente,
+      descuentoPersonalizado: Number(descuentoPersonalizado) || 0,
+      estado: 'activo',
+      fechaRegistro: moment().tz("America/Bogota").format('YYYY-MM-DD HH:mm:ss'),
+      createdAt: new Date(),
+      lastUpdate: new Date()
+    };
+
+    await db.collection('clientes').insertOne(newClient);
+
+    return res.status(201).json({
+      status: "Success",
+      message: "Cliente creado correctamente.",
+      data: {
+        id: newClient._id,
+        ...newClient
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al crear cliente:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno del servidor",
+      error: error.message
+    });
+  }
+};
+
+const getClients = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { page = 1, limit = 10, search = '', estado = 'activo' } = req.query;
+
+    const query = {};
+    
+    // Filtro por estado
+    if (estado && estado !== 'all') {
+      query.estado = estado;
+    }
+
+    // Filtro de búsqueda
+    if (search) {
+      query.$or = [
+        { nombre: { $regex: search, $options: 'i' } },
+        { numeroIdentificacion: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { ciudad: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const clientes = await db.collection('clientes')
+      .find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .toArray();
+
+    const total = await db.collection('clientes').countDocuments(query);
+
+    const formattedClients = clientes.map(client => ({
+      id: client._id,
+      tipoIdentificacion: client.tipoIdentificacion,
+      numeroIdentificacion: client.numeroIdentificacion,
+      nombre: client.nombre,
+      email: client.email,
+      telefono: client.telefono,
+      departamento: client.departamento,
+      ciudad: client.ciudad,
+      ubicacionLocal: client.ubicacionLocal,
+      tipoCliente: client.tipoCliente,
+      descuentoPersonalizado: client.descuentoPersonalizado,
+      estado: client.estado,
+      fechaRegistro: client.fechaRegistro
+    }));
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Clientes obtenidos correctamente.",
+      data: {
+        clientes: formattedClients,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit))
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al obtener clientes:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al obtener los clientes.",
+      error: error.message
+    });
+  }
+};
+
+const getClientById = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID del cliente es requerido."
+      });
+    }
+
+    const client = await db.collection('clientes').findOne({ _id: new ObjectId(id) });
+
+    if (!client) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Cliente no encontrado."
+      });
+    }
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Cliente obtenido correctamente.",
+      data: {
+        id: client._id,
+        tipoIdentificacion: client.tipoIdentificacion,
+        numeroIdentificacion: client.numeroIdentificacion,
+        nombre: client.nombre,
+        email: client.email,
+        telefono: client.telefono,
+        departamento: client.departamento,
+        ciudad: client.ciudad,
+        ubicacionLocal: client.ubicacionLocal,
+        tipoCliente: client.tipoCliente,
+        descuentoPersonalizado: client.descuentoPersonalizado,
+        estado: client.estado,
+        fechaRegistro: client.fechaRegistro,
+        createdAt: client.createdAt,
+        lastUpdate: client.lastUpdate
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al obtener cliente:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al obtener el cliente.",
+      error: error.message
+    });
+  }
+};
+
+const updateClient = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { id } = req.params;
+    const {
+      tipoIdentificacion,
+      numeroIdentificacion,
+      nombre,
+      email,
+      telefono,
+      departamento,
+      ciudad,
+      ubicacionLocal,
+      tipoCliente,
+      descuentoPersonalizado,
+      estado
+    } = req.body;
+
+    if (!id) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID del cliente es requerido."
+      });
+    }
+
+    const existingClient = await db.collection('clientes').findOne({ _id: new ObjectId(id) });
+    if (!existingClient) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Cliente no encontrado."
+      });
+    }
+
+    // Validar tipo de identificación si se proporciona
+    if (tipoIdentificacion) {
+      const tiposValidos = ['CC', 'NIT', 'CE', 'TI', 'RC', 'PAS'];
+      if (!tiposValidos.includes(tipoIdentificacion)) {
+        return res.status(400).json({
+          status: "Error",
+          message: "Tipo de identificación inválido."
+        });
+      }
+    }
+
+    // Validar email si se proporciona
+    if (email) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({
+          status: "Error",
+          message: "Formato de email inválido."
+        });
+      }
+
+      // Verificar si el email ya existe en otro cliente
+      const emailExists = await db.collection('clientes').findOne({
+        email,
+        _id: { $ne: new ObjectId(id) }
+      });
+      if (emailExists) {
+        return res.status(409).json({
+          status: "Error",
+          message: "Ya existe un cliente con este email."
+        });
+      }
+    }
+
+    // Verificar si el número de identificación ya existe en otro cliente
+    if (tipoIdentificacion && numeroIdentificacion) {
+      const docExists = await db.collection('clientes').findOne({
+        tipoIdentificacion,
+        numeroIdentificacion,
+        _id: { $ne: new ObjectId(id) }
+      });
+      if (docExists) {
+        return res.status(409).json({
+          status: "Error",
+          message: "Ya existe un cliente con este tipo y número de identificación."
+        });
+      }
+    }
+
+    const updateFields = {
+      ...(tipoIdentificacion && { tipoIdentificacion }),
+      ...(numeroIdentificacion && { numeroIdentificacion }),
+      ...(nombre && { nombre }),
+      ...(email && { email }),
+      ...(telefono && { telefono }),
+      ...(departamento !== undefined && { departamento }),
+      ...(ciudad !== undefined && { ciudad }),
+      ...(ubicacionLocal !== undefined && { ubicacionLocal }),
+      ...(tipoCliente && { tipoCliente }),
+      ...(descuentoPersonalizado !== undefined && { descuentoPersonalizado: Number(descuentoPersonalizado) }),
+      ...(estado && { estado }),
+      lastUpdate: new Date()
+    };
+
+    await db.collection('clientes').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateFields }
+    );
+
+    const updatedClient = await db.collection('clientes').findOne({ _id: new ObjectId(id) });
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Cliente actualizado correctamente.",
+      data: {
+        id: updatedClient._id,
+        tipoIdentificacion: updatedClient.tipoIdentificacion,
+        numeroIdentificacion: updatedClient.numeroIdentificacion,
+        nombre: updatedClient.nombre,
+        email: updatedClient.email,
+        telefono: updatedClient.telefono,
+        departamento: updatedClient.departamento,
+        ciudad: updatedClient.ciudad,
+        ubicacionLocal: updatedClient.ubicacionLocal,
+        tipoCliente: updatedClient.tipoCliente,
+        descuentoPersonalizado: updatedClient.descuentoPersonalizado,
+        estado: updatedClient.estado,
+        fechaRegistro: updatedClient.fechaRegistro,
+        lastUpdate: updatedClient.lastUpdate
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al actualizar cliente:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al actualizar el cliente.",
+      error: error.message
+    });
+  }
+};
+
+const deleteClient = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID del cliente es requerido."
+      });
+    }
+
+    const client = await db.collection('clientes').findOne({ _id: new ObjectId(id) });
+    if (!client) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Cliente no encontrado."
+      });
+    }
+
+    // Verificar si el cliente tiene facturas pendientes
+    const facturasPendientes = await db.collection('facturas').countDocuments({
+      clienteId: new ObjectId(id),
+      estado: { $in: ['pendiente', 'parcialmente_pagada', 'vencida'] }
+    });
+
+    if (facturasPendientes > 0) {
+      return res.status(400).json({
+        status: "Error",
+        message: "No se puede eliminar el cliente porque tiene facturas pendientes de pago."
+      });
+    }
+
+    // Mover a historial antes de eliminar
+    await db.collection('clientesHistorial').insertOne({
+      ...client,
+      deletedAt: new Date()
+    });
+
+    // Eliminar de la colección principal
+    await db.collection('clientes').deleteOne({ _id: new ObjectId(id) });
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Cliente eliminado correctamente y movido a historial."
+    });
+
+  } catch (error) {
+    console.error('Error al eliminar cliente:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al eliminar el cliente.",
+      error: error.message
+    });
+  }
+};
+
+const searchClients = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { q, tipo = 'all' } = req.query;
+
+    if (!q || q.trim().length < 2) {
+      return res.status(400).json({
+        status: "Error",
+        message: "El término de búsqueda debe tener al menos 2 caracteres."
+      });
+    }
+
+    const query = {
+      $or: [
+        { nombre: { $regex: q, $options: 'i' } },
+        { numeroIdentificacion: { $regex: q, $options: 'i' } },
+        { email: { $regex: q, $options: 'i' } },
+        { telefono: { $regex: q, $options: 'i' } }
+      ]
+    };
+
+    if (tipo !== 'all') {
+      query.tipoCliente = tipo;
+    }
+
+    const clientes = await db.collection('clientes')
+      .find(query)
+      .limit(20)
+      .toArray();
+
+    const resultado = clientes.map(client => ({
+      id: client._id,
+      tipoIdentificacion: client.tipoIdentificacion,
+      numeroIdentificacion: client.numeroIdentificacion,
+      nombre: client.nombre,
+      email: client.email,
+      telefono: client.telefono,
+      ciudad: client.ciudad,
+      tipoCliente: client.tipoCliente,
+      descuentoPersonalizado: client.descuentoPersonalizado,
+      estado: client.estado
+    }));
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Búsqueda completada.",
+      data: resultado
+    });
+
+  } catch (error) {
+    console.error('Error al buscar clientes:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al buscar clientes.",
+      error: error.message
+    });
+  }
+};
+
+/*---------------------------------SISTEMA_DE_FACTURACION--------------------------------------------------------------*/
+
+const generateInvoiceNumber = async (db) => {
+  try {
+    // Obtener el último número de factura
+    const lastInvoice = await db.collection('facturas')
+      .findOne({}, { sort: { numeroFactura: -1 } });
+    
+    let nextNumber = 1;
+    if (lastInvoice && lastInvoice.numeroFactura) {
+      nextNumber = parseInt(lastInvoice.numeroFactura) + 1;
+    }
+    
+    return nextNumber.toString().padStart(6, '0');
+  } catch (error) {
+    console.error('Error generando número de factura:', error);
+    return '000001';
+  }
+};
+
+const createInvoice = async (req, res) => {
+  try {
+    const db = await getDb();
+    const {
+      clienteId,
+      productos,
+      subtotal,
+      descuentoAplicado = 0,
+      iva = 0,
+      observaciones = '',
+      metodoPago = 'Efectivo',
+      diasVencimiento = 30
+    } = req.body;
+
+    // Validaciones obligatorias
+    if (!clienteId || !productos || !Array.isArray(productos) || productos.length === 0) {
+      return res.status(400).json({
+        status: "Error",
+        message: "clienteId y productos son obligatorios."
+      });
+    }
+
+    // Verificar que el cliente existe
+    const cliente = await db.collection('clientes').findOne({ _id: new ObjectId(clienteId) });
+    if (!cliente) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Cliente no encontrado."
+      });
+    }
+
+    // Verificar productos y stock
+    let totalCalculado = 0;
+    const detalleFactura = [];
+
+    for (const item of productos) {
+      const { code, cantidad, precioUnitario } = item;
+
+      if (!code || !cantidad || !precioUnitario) {
+        return res.status(400).json({
+          status: "Error",
+          message: "Cada producto debe tener code, cantidad y precioUnitario."
+        });
+      }
+
+      // Verificar stock disponible
+      const productoInventario = await db.collection('inventario').findOne({ code });
+      if (!productoInventario) {
+        return res.status(404).json({
+          status: "Error",
+          message: `Producto con código ${code} no encontrado en inventario.`
+        });
+      }
+
+      if (productoInventario.stock < cantidad) {
+        return res.status(409).json({
+          status: "Error",
+          message: `Stock insuficiente para el producto ${code}. Disponible: ${productoInventario.stock}`
+        });
+      }
+
+      const subtotalItem = precioUnitario * cantidad;
+      totalCalculado += subtotalItem;
+
+      detalleFactura.push({
+        code,
+        nombre: productoInventario.name,
+        categoria: productoInventario.category,
+        cantidad,
+        precioUnitario,
+        subtotal: subtotalItem
+      });
+    }
+
+    // Aplicar descuento personalizado del cliente si existe
+    let descuentoFinal = descuentoAplicado;
+    if (cliente.descuentoPersonalizado > 0) {
+      descuentoFinal = Math.max(descuentoAplicado, cliente.descuentoPersonalizado);
+    }
+
+    // Calcular totales
+    const subtotalFinal = totalCalculado;
+    const descuentoTotal = (subtotalFinal * descuentoFinal) / 100;
+    const subtotalConDescuento = subtotalFinal - descuentoTotal;
+    const ivaTotal = (subtotalConDescuento * iva) / 100;
+    const totalFinal = subtotalConDescuento + ivaTotal;
+
+    // Generar número de factura
+    const numeroFactura = await generateInvoiceNumber(db);
+
+    // Calcular fechas
+    const fechaEmision = new Date();
+    const fechaVencimiento = new Date();
+    fechaVencimiento.setDate(fechaEmision.getDate() + diasVencimiento);
+
+    const factura = {
+      numeroFactura,
+      clienteId: new ObjectId(clienteId),
+      cliente: {
+        id: cliente._id,
+        nombre: cliente.nombre,
+        tipoIdentificacion: cliente.tipoIdentificacion,
+        numeroIdentificacion: cliente.numeroIdentificacion,
+        email: cliente.email,
+        telefono: cliente.telefono,
+        ciudad: cliente.ciudad,
+        ubicacionLocal: cliente.ubicacionLocal
+      },
+      productos: detalleFactura,
+      subtotal: subtotalFinal,
+      descuentoAplicado: descuentoFinal,
+      descuentoTotal,
+      iva,
+      ivaTotal,
+      total: totalFinal,
+      estado: 'pendiente',
+      metodoPago,
+      observaciones,
+      fechaEmision,
+      fechaVencimiento,
+      saldoPendiente: totalFinal,
+      abonos: [],
+      createdAt: new Date(),
+      lastUpdate: new Date()
+    };
+
+    // Crear la factura
+    await db.collection('facturas').insertOne(factura);
+
+    // Actualizar stock de productos
+    for (const item of productos) {
+      await db.collection('inventario').updateOne(
+        { code: item.code },
+        { 
+          $inc: { stock: -item.cantidad },
+          $set: { lastUpdate: new Date() }
+        }
+      );
+    }
+
+    return res.status(201).json({
+      status: "Success",
+      message: "Factura creada correctamente.",
+      data: {
+        id: factura._id,
+        numeroFactura: factura.numeroFactura,
+        cliente: factura.cliente,
+        total: factura.total,
+        estado: factura.estado,
+        fechaEmision: factura.fechaEmision,
+        fechaVencimiento: factura.fechaVencimiento
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al crear factura:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al crear la factura.",
+      error: error.message
+    });
+  }
+};
+
+const getInvoices = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { 
+      page = 1, 
+      limit = 10, 
+      estado = 'all', 
+      clienteId = null,
+      desde = null,
+      hasta = null
+    } = req.query;
+
+    const query = {};
+
+    // Filtro por estado
+    if (estado && estado !== 'all') {
+      query.estado = estado;
+    }
+
+    // Filtro por cliente
+    if (clienteId) {
+      query.clienteId = new ObjectId(clienteId);
+    }
+
+    // Filtro por fechas
+    if (desde || hasta) {
+      query.fechaEmision = {};
+      if (desde) query.fechaEmision.$gte = new Date(desde);
+      if (hasta) query.fechaEmision.$lte = new Date(hasta);
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const facturas = await db.collection('facturas')
+      .find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .toArray();
+
+    const total = await db.collection('facturas').countDocuments(query);
+
+    const formattedInvoices = facturas.map(factura => ({
+      id: factura._id,
+      numeroFactura: factura.numeroFactura,
+      cliente: factura.cliente,
+      total: factura.total,
+      saldoPendiente: factura.saldoPendiente,
+      estado: factura.estado,
+      metodoPago: factura.metodoPago,
+      fechaEmision: factura.fechaEmision,
+      fechaVencimiento: factura.fechaVencimiento,
+      observaciones: factura.observaciones
+    }));
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Facturas obtenidas correctamente.",
+      data: {
+        facturas: formattedInvoices,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit))
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al obtener facturas:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al obtener las facturas.",
+      error: error.message
+    });
+  }
+};
+
+const getInvoiceById = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de la factura es requerido."
+      });
+    }
+
+    const factura = await db.collection('facturas').findOne({ _id: new ObjectId(id) });
+
+    if (!factura) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Factura no encontrada."
+      });
+    }
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Factura obtenida correctamente.",
+      data: factura
+    });
+
+  } catch (error) {
+    console.error('Error al obtener factura:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al obtener la factura.",
+      error: error.message
+    });
+  }
+};
+
+const updateInvoiceStatus = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { id } = req.params;
+    const { estado, observaciones } = req.body;
+
+    if (!id) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de la factura es requerido."
+      });
+    }
+
+    const estadosValidos = ['pendiente', 'pagada', 'parcialmente_pagada', 'vencida', 'cancelada'];
+    if (!estado || !estadosValidos.includes(estado)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Estado inválido. Debe ser: pendiente, pagada, parcialmente_pagada, vencida, cancelada"
+      });
+    }
+
+    const factura = await db.collection('facturas').findOne({ _id: new ObjectId(id) });
+    if (!factura) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Factura no encontrada."
+      });
+    }
+
+    const updateFields = {
+      estado,
+      lastUpdate: new Date()
+    };
+
+    if (observaciones) {
+      updateFields.observaciones = observaciones;
+    }
+
+    await db.collection('facturas').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateFields }
+    );
+
+    const updatedInvoice = await db.collection('facturas').findOne({ _id: new ObjectId(id) });
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Estado de factura actualizado correctamente.",
+      data: {
+        id: updatedInvoice._id,
+        numeroFactura: updatedInvoice.numeroFactura,
+        estado: updatedInvoice.estado,
+        observaciones: updatedInvoice.observaciones
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al actualizar estado de factura:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al actualizar la factura.",
+      error: error.message
+    });
+  }
+};
+
+const getInvoicesByClient = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { clienteId } = req.params;
+    const { estado = 'all' } = req.query;
+
+    if (!clienteId) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID del cliente es requerido."
+      });
+    }
+
+    const query = { clienteId: new ObjectId(clienteId) };
+
+    if (estado !== 'all') {
+      query.estado = estado;
+    }
+
+    const facturas = await db.collection('facturas')
+      .find(query)
+      .sort({ fechaEmision: -1 })
+      .toArray();
+
+    const formattedInvoices = facturas.map(factura => ({
+      id: factura._id,
+      numeroFactura: factura.numeroFactura,
+      total: factura.total,
+      saldoPendiente: factura.saldoPendiente,
+      estado: factura.estado,
+      fechaEmision: factura.fechaEmision,
+      fechaVencimiento: factura.fechaVencimiento,
+      diasVencido: factura.estado === 'vencida' ? 
+        Math.ceil((new Date() - factura.fechaVencimiento) / (1000 * 60 * 60 * 24)) : 0
+    }));
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Facturas del cliente obtenidas correctamente.",
+      data: formattedInvoices
+    });
+
+  } catch (error) {
+    console.error('Error al obtener facturas del cliente:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al obtener las facturas del cliente.",
+      error: error.message
+    });
+  }
+};
+
+/*---------------------------------SISTEMA_DE_ABONOS--------------------------------------------------------------*/
+
+const createPayment = async (req, res) => {
+  try {
+    const db = await getDb();
+    const {
+      facturaId,
+      montoAbono,
+      metodoPago,
+      observaciones = '',
+      usuarioRegistra
+    } = req.body;
+
+    // Validaciones obligatorias
+    if (!facturaId || !montoAbono || !metodoPago) {
+      return res.status(400).json({
+        status: "Error",
+        message: "facturaId, montoAbono y metodoPago son obligatorios."
+      });
+    }
+
+    if (montoAbono <= 0) {
+      return res.status(400).json({
+        status: "Error",
+        message: "El monto del abono debe ser mayor a 0."
+      });
+    }
+
+    // Verificar que la factura existe
+    const factura = await db.collection('facturas').findOne({ _id: new ObjectId(facturaId) });
+    if (!factura) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Factura no encontrada."
+      });
+    }
+
+    // Verificar que la factura no esté pagada o cancelada
+    if (factura.estado === 'pagada') {
+      return res.status(400).json({
+        status: "Error",
+        message: "Esta factura ya está completamente pagada."
+      });
+    }
+
+    if (factura.estado === 'cancelada') {
+      return res.status(400).json({
+        status: "Error",
+        message: "No se pueden registrar abonos en facturas canceladas."
+      });
+    }
+
+    // Verificar que el abono no exceda el saldo pendiente
+    if (montoAbono > factura.saldoPendiente) {
+      return res.status(400).json({
+        status: "Error",
+        message: `El abono no puede exceder el saldo pendiente de $${factura.saldoPendiente}.`
+      });
+    }
+
+    // Crear el abono
+    const abono = {
+      facturaId: new ObjectId(facturaId),
+      clienteId: factura.clienteId,
+      montoAbono: Number(montoAbono),
+      metodoPago,
+      observaciones,
+      usuarioRegistra: usuarioRegistra || 'Sistema',
+      fechaAbono: new Date(),
+      createdAt: new Date()
+    };
+
+    // Insertar el abono
+    await db.collection('abonos').insertOne(abono);
+
+    // Calcular nuevo saldo pendiente
+    const nuevoSaldoPendiente = factura.saldoPendiente - montoAbono;
+    
+    // Determinar nuevo estado de la factura
+    let nuevoEstado = factura.estado;
+    if (nuevoSaldoPendiente === 0) {
+      nuevoEstado = 'pagada';
+    } else if (nuevoSaldoPendiente < factura.total) {
+      nuevoEstado = 'parcialmente_pagada';
+    }
+
+    // Actualizar la factura
+    await db.collection('facturas').updateOne(
+      { _id: new ObjectId(facturaId) },
+      {
+        $set: {
+          saldoPendiente: nuevoSaldoPendiente,
+          estado: nuevoEstado,
+          lastUpdate: new Date()
+        },
+        $push: { abonos: abono }
+      }
+    );
+
+    return res.status(201).json({
+      status: "Success",
+      message: "Abono registrado correctamente.",
+      data: {
+        id: abono._id,
+        facturaId: abono.facturaId,
+        montoAbono: abono.montoAbono,
+        saldoAnterior: factura.saldoPendiente,
+        saldoNuevo: nuevoSaldoPendiente,
+        estadoFactura: nuevoEstado,
+        fechaAbono: abono.fechaAbono
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al registrar abono:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al registrar el abono.",
+      error: error.message
+    });
+  }
+};
+
+const getPaymentsByInvoice = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { facturaId } = req.params;
+
+    if (!facturaId) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de la factura es requerido."
+      });
+    }
+
+    const abonos = await db.collection('abonos')
+      .find({ facturaId: new ObjectId(facturaId) })
+      .sort({ fechaAbono: -1 })
+      .toArray();
+
+    const formattedPayments = abonos.map(abono => ({
+      id: abono._id,
+      montoAbono: abono.montoAbono,
+      metodoPago: abono.metodoPago,
+      observaciones: abono.observaciones,
+      usuarioRegistra: abono.usuarioRegistra,
+      fechaAbono: abono.fechaAbono
+    }));
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Abonos obtenidos correctamente.",
+      data: formattedPayments
+    });
+
+  } catch (error) {
+    console.error('Error al obtener abonos:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al obtener los abonos.",
+      error: error.message
+    });
+  }
+};
+
+const getPaymentsByClient = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { clienteId } = req.params;
+    const { desde = null, hasta = null } = req.query;
+
+    if (!clienteId) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID del cliente es requerido."
+      });
+    }
+
+    const query = { clienteId: new ObjectId(clienteId) };
+
+    // Filtro por fechas
+    if (desde || hasta) {
+      query.fechaAbono = {};
+      if (desde) query.fechaAbono.$gte = new Date(desde);
+      if (hasta) query.fechaAbono.$lte = new Date(hasta);
+    }
+
+    const abonos = await db.collection('abonos')
+      .find(query)
+      .sort({ fechaAbono: -1 })
+      .toArray();
+
+    const formattedPayments = abonos.map(abono => ({
+      id: abono._id,
+      facturaId: abono.facturaId,
+      montoAbono: abono.montoAbono,
+      metodoPago: abono.metodoPago,
+      observaciones: abono.observaciones,
+      usuarioRegistra: abono.usuarioRegistra,
+      fechaAbono: abono.fechaAbono
+    }));
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Abonos del cliente obtenidos correctamente.",
+      data: formattedPayments
+    });
+
+  } catch (error) {
+    console.error('Error al obtener abonos del cliente:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al obtener los abonos del cliente.",
+      error: error.message
+    });
+  }
+};
+
+/*---------------------------------ESTADO_DE_CUENTA--------------------------------------------------------------*/
+
+const getAccountStatus = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { clienteId } = req.params;
+
+    if (!clienteId) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID del cliente es requerido."
+      });
+    }
+
+    // Obtener información del cliente
+    const cliente = await db.collection('clientes').findOne({ _id: new ObjectId(clienteId) });
+    if (!cliente) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Cliente no encontrado."
+      });
+    }
+
+    // Obtener todas las facturas del cliente
+    const facturas = await db.collection('facturas')
+      .find({ clienteId: new ObjectId(clienteId) })
+      .sort({ fechaEmision: -1 })
+      .toArray();
+
+    // Obtener todos los abonos del cliente
+    const abonos = await db.collection('abonos')
+      .find({ clienteId: new ObjectId(clienteId) })
+      .sort({ fechaAbono: -1 })
+      .toArray();
+
+    // Calcular resumen
+    const totalFacturado = facturas.reduce((sum, f) => sum + f.total, 0);
+    const totalAbonado = abonos.reduce((sum, a) => sum + a.montoAbono, 0);
+    const saldoPendiente = totalFacturado - totalAbonado;
+
+    // Clasificar facturas por estado
+    const facturasPendientes = facturas.filter(f => f.estado === 'pendiente');
+    const facturasParciales = facturas.filter(f => f.estado === 'parcialmente_pagada');
+    const facturasPagadas = facturas.filter(f => f.estado === 'pagada');
+    const facturasVencidas = facturas.filter(f => f.estado === 'vencida');
+
+    // Calcular días de vencimiento promedio
+    const facturasConVencimiento = facturas.filter(f => f.estado !== 'pagada' && f.estado !== 'cancelada');
+    const diasVencimientoPromedio = facturasConVencimiento.length > 0 
+      ? facturasConVencimiento.reduce((sum, f) => {
+          const dias = Math.ceil((new Date() - f.fechaVencimiento) / (1000 * 60 * 60 * 24));
+          return sum + Math.max(0, dias);
+        }, 0) / facturasConVencimiento.length
+      : 0;
+
+    const resumen = {
+      cliente: {
+        id: cliente._id,
+        nombre: cliente.nombre,
+        tipoIdentificacion: cliente.tipoIdentificacion,
+        numeroIdentificacion: cliente.numeroIdentificacion,
+        email: cliente.email,
+        telefono: cliente.telefono,
+        ciudad: cliente.ciudad
+      },
+      resumenFinanciero: {
+        totalFacturado,
+        totalAbonado,
+        saldoPendiente,
+        facturasPendientes: facturasPendientes.length,
+        facturasParciales: facturasParciales.length,
+        facturasPagadas: facturasPagadas.length,
+        facturasVencidas: facturasVencidas.length,
+        diasVencimientoPromedio: Math.round(diasVencimientoPromedio)
+      },
+      facturas: facturas.map(f => ({
+        id: f._id,
+        numeroFactura: f.numeroFactura,
+        total: f.total,
+        saldoPendiente: f.saldoPendiente,
+        estado: f.estado,
+        fechaEmision: f.fechaEmision,
+        fechaVencimiento: f.fechaVencimiento,
+        diasVencido: f.estado === 'vencida' ? 
+          Math.ceil((new Date() - f.fechaVencimiento) / (1000 * 60 * 60 * 24)) : 0
+      })),
+      abonos: abonos.map(a => ({
+        id: a._id,
+        facturaId: a.facturaId,
+        montoAbono: a.montoAbono,
+        metodoPago: a.metodoPago,
+        fechaAbono: a.fechaAbono,
+        observaciones: a.observaciones
+      }))
+    };
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Estado de cuenta obtenido correctamente.",
+      data: resumen
+    });
+
+  } catch (error) {
+    console.error('Error al obtener estado de cuenta:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al obtener el estado de cuenta.",
+      error: error.message
+    });
+  }
+};
+
+/*---------------------------------REPORTES_DE_CARTERA--------------------------------------------------------------*/
+
+const getPortfolioReport = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { 
+      desde = null, 
+      hasta = null, 
+      estado = 'all',
+      diasVencimiento = 0,
+      format = 'json'
+    } = req.query;
+
+    const query = {};
+
+    // Filtro por fechas de emisión
+    if (desde || hasta) {
+      query.fechaEmision = {};
+      if (desde) query.fechaEmision.$gte = new Date(desde);
+      if (hasta) query.fechaEmision.$lte = new Date(hasta);
+    }
+
+    // Filtro por estado
+    if (estado !== 'all') {
+      query.estado = estado;
+    }
+
+    // Obtener facturas
+    const facturas = await db.collection('facturas')
+      .find(query)
+      .sort({ fechaEmision: -1 })
+      .toArray();
+
+    // Filtrar por días de vencimiento si se especifica
+    let facturasFiltradas = facturas;
+    if (diasVencimiento > 0) {
+      const fechaLimite = new Date();
+      fechaLimite.setDate(fechaLimite.getDate() - diasVencimiento);
+      
+      facturasFiltradas = facturas.filter(f => {
+        const diasVencido = Math.ceil((new Date() - f.fechaVencimiento) / (1000 * 60 * 60 * 24));
+        return diasVencido >= diasVencimiento;
+      });
+    }
+
+    // Agrupar por cliente
+    const carteraPorCliente = {};
+    
+    for (const factura of facturasFiltradas) {
+      const clienteId = factura.clienteId.toString();
+      
+      if (!carteraPorCliente[clienteId]) {
+        carteraPorCliente[clienteId] = {
+          cliente: factura.cliente,
+          facturas: [],
+          totalFacturado: 0,
+          totalAbonado: 0,
+          saldoPendiente: 0,
+          facturasPendientes: 0,
+          facturasVencidas: 0,
+          diasVencimientoPromedio: 0
+        };
+      }
+
+      carteraPorCliente[clienteId].facturas.push({
+        id: factura._id,
+        numeroFactura: factura.numeroFactura,
+        total: factura.total,
+        saldoPendiente: factura.saldoPendiente,
+        estado: factura.estado,
+        fechaEmision: factura.fechaEmision,
+        fechaVencimiento: factura.fechaVencimiento,
+        diasVencido: factura.estado === 'vencida' ? 
+          Math.ceil((new Date() - factura.fechaVencimiento) / (1000 * 60 * 60 * 24)) : 0
+      });
+
+      carteraPorCliente[clienteId].totalFacturado += factura.total;
+      carteraPorCliente[clienteId].totalAbonado += (factura.total - factura.saldoPendiente);
+      carteraPorCliente[clienteId].saldoPendiente += factura.saldoPendiente;
+      
+      if (factura.estado === 'pendiente' || factura.estado === 'parcialmente_pagada') {
+        carteraPorCliente[clienteId].facturasPendientes++;
+      }
+      
+      if (factura.estado === 'vencida') {
+        carteraPorCliente[clienteId].facturasVencidas++;
+      }
+    }
+
+    // Calcular días de vencimiento promedio por cliente
+    Object.values(carteraPorCliente).forEach(cliente => {
+      const facturasConVencimiento = cliente.facturas.filter(f => 
+        f.estado !== 'pagada' && f.estado !== 'cancelada'
+      );
+      
+      if (facturasConVencimiento.length > 0) {
+        const diasPromedio = facturasConVencimiento.reduce((sum, f) => {
+          const dias = Math.ceil((new Date() - f.fechaVencimiento) / (1000 * 60 * 60 * 24));
+          return sum + Math.max(0, dias);
+        }, 0) / facturasConVencimiento.length;
+        
+        cliente.diasVencimientoPromedio = Math.round(diasPromedio);
+      }
+    });
+
+    // Convertir a array y ordenar por saldo pendiente
+    const carteraArray = Object.values(carteraPorCliente)
+      .sort((a, b) => b.saldoPendiente - a.saldoPendiente);
+
+    // Calcular totales generales
+    const totalesGenerales = {
+      totalFacturado: carteraArray.reduce((sum, c) => sum + c.totalFacturado, 0),
+      totalAbonado: carteraArray.reduce((sum, c) => sum + c.totalAbonado, 0),
+      saldoPendiente: carteraArray.reduce((sum, c) => sum + c.saldoPendiente, 0),
+      totalClientes: carteraArray.length,
+      clientesConSaldo: carteraArray.filter(c => c.saldoPendiente > 0).length,
+      clientesMorosos: carteraArray.filter(c => c.facturasVencidas > 0).length
+    };
+
+    const reporte = {
+      filtros: {
+        desde,
+        hasta,
+        estado,
+        diasVencimiento: Number(diasVencimiento)
+      },
+      totalesGenerales,
+      cartera: carteraArray
+    };
+
+    if (format === 'pdf') {
+      const doc = new PDFDocument();
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename=reporte-cartera.pdf');
+      doc.pipe(res);
+
+      doc.fontSize(18).text('Reporte de Cartera', { align: 'center' });
+      doc.moveDown();
+      
+      doc.fontSize(12).text(`Período: ${desde || 'Inicio'} - ${hasta || 'Actual'}`);
+      doc.text(`Total Facturado: $${totalesGenerales.totalFacturado.toLocaleString()}`);
+      doc.text(`Total Abonado: $${totalesGenerales.totalAbonado.toLocaleString()}`);
+      doc.text(`Saldo Pendiente: $${totalesGenerales.saldoPendiente.toLocaleString()}`);
+      doc.text(`Clientes con Saldo: ${totalesGenerales.clientesConSaldo}`);
+      doc.text(`Clientes Morosos: ${totalesGenerales.clientesMorosos}`);
+      doc.moveDown();
+
+      carteraArray.forEach((cliente, index) => {
+        if (index > 0) doc.addPage();
+        
+        doc.fontSize(14).text(`${cliente.cliente.nombre}`, { underline: true });
+        doc.fontSize(10).text(`Documento: ${cliente.cliente.tipoIdentificacion} ${cliente.cliente.numeroIdentificacion}`);
+        doc.text(`Email: ${cliente.cliente.email}`);
+        doc.text(`Teléfono: ${cliente.cliente.telefono}`);
+        doc.moveDown();
+        
+        doc.text(`Total Facturado: $${cliente.totalFacturado.toLocaleString()}`);
+        doc.text(`Total Abonado: $${cliente.totalAbonado.toLocaleString()}`);
+        doc.text(`Saldo Pendiente: $${cliente.saldoPendiente.toLocaleString()}`);
+        doc.text(`Facturas Pendientes: ${cliente.facturasPendientes}`);
+        doc.text(`Facturas Vencidas: ${cliente.facturasVencidas}`);
+        doc.text(`Días Vencimiento Promedio: ${cliente.diasVencimientoPromedio}`);
+        doc.moveDown();
+      });
+
+      doc.end();
+    } else if (format === 'excel') {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Cartera');
+
+      worksheet.columns = [
+        { header: 'Cliente', key: 'cliente', width: 30 },
+        { header: 'Documento', key: 'documento', width: 20 },
+        { header: 'Email', key: 'email', width: 25 },
+        { header: 'Teléfono', key: 'telefono', width: 15 },
+        { header: 'Total Facturado', key: 'totalFacturado', width: 15 },
+        { header: 'Total Abonado', key: 'totalAbonado', width: 15 },
+        { header: 'Saldo Pendiente', key: 'saldoPendiente', width: 15 },
+        { header: 'Facturas Pendientes', key: 'facturasPendientes', width: 15 },
+        { header: 'Facturas Vencidas', key: 'facturasVencidas', width: 15 },
+        { header: 'Días Vencimiento Promedio', key: 'diasVencimientoPromedio', width: 20 }
+      ];
+
+      carteraArray.forEach(cliente => {
+        worksheet.addRow({
+          cliente: cliente.cliente.nombre,
+          documento: `${cliente.cliente.tipoIdentificacion} ${cliente.cliente.numeroIdentificacion}`,
+          email: cliente.cliente.email,
+          telefono: cliente.cliente.telefono,
+          totalFacturado: cliente.totalFacturado,
+          totalAbonado: cliente.totalAbonado,
+          saldoPendiente: cliente.saldoPendiente,
+          facturasPendientes: cliente.facturasPendientes,
+          facturasVencidas: cliente.facturasVencidas,
+          diasVencimientoPromedio: cliente.diasVencimientoPromedio
+        });
+      });
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename=reporte-cartera.xlsx');
+      await workbook.xlsx.write(res);
+      res.end();
+    } else {
+      return res.status(200).json({
+        status: "Success",
+        message: "Reporte de cartera generado correctamente.",
+        data: reporte
+      });
+    }
+
+  } catch (error) {
+    console.error('Error al generar reporte de cartera:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al generar el reporte de cartera.",
+      error: error.message
+    });
+  }
+};
+
+const getOverdueInvoices = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { diasVencimiento = 0 } = req.query;
+
+    const fechaLimite = new Date();
+    fechaLimite.setDate(fechaLimite.getDate() - diasVencimiento);
+
+    const facturasVencidas = await db.collection('facturas')
+      .find({
+        estado: { $in: ['pendiente', 'parcialmente_pagada'] },
+        fechaVencimiento: { $lt: fechaLimite }
+      })
+      .sort({ fechaVencimiento: 1 })
+      .toArray();
+
+    const facturasConDiasVencido = facturasVencidas.map(factura => {
+      const diasVencido = Math.ceil((new Date() - factura.fechaVencimiento) / (1000 * 60 * 60 * 24));
+      return {
+        id: factura._id,
+        numeroFactura: factura.numeroFactura,
+        cliente: factura.cliente,
+        total: factura.total,
+        saldoPendiente: factura.saldoPendiente,
+        fechaEmision: factura.fechaEmision,
+        fechaVencimiento: factura.fechaVencimiento,
+        diasVencido,
+        estado: factura.estado
+      };
+    });
+
+    // Agrupar por cliente
+    const morososPorCliente = {};
+    facturasConDiasVencido.forEach(factura => {
+      const clienteId = factura.clienteId.toString();
+      if (!morososPorCliente[clienteId]) {
+        morososPorCliente[clienteId] = {
+          cliente: factura.cliente,
+          facturas: [],
+          totalSaldo: 0,
+          diasVencimientoMaximo: 0
+        };
+      }
+      
+      morososPorCliente[clienteId].facturas.push(factura);
+      morososPorCliente[clienteId].totalSaldo += factura.saldoPendiente;
+      morososPorCliente[clienteId].diasVencimientoMaximo = Math.max(
+        morososPorCliente[clienteId].diasVencimientoMaximo,
+        factura.diasVencido
+      );
+    });
+
+    const morososArray = Object.values(morososPorCliente)
+      .sort((a, b) => b.totalSaldo - a.totalSaldo);
+
+    const totales = {
+      totalFacturasVencidas: facturasConDiasVencido.length,
+      totalSaldoVencido: facturasConDiasVencido.reduce((sum, f) => sum + f.saldoPendiente, 0),
+      totalClientesMorosos: morososArray.length,
+      promedioDiasVencido: facturasConDiasVencido.length > 0 
+        ? Math.round(facturasConDiasVencido.reduce((sum, f) => sum + f.diasVencido, 0) / facturasConDiasVencido.length)
+        : 0
+    };
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Facturas vencidas obtenidas correctamente.",
+      data: {
+        filtros: { diasVencimiento: Number(diasVencimiento) },
+        totales,
+        morosos: morososArray
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al obtener facturas vencidas:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al obtener las facturas vencidas.",
+      error: error.message
+    });
+  }
+};
+
+const getPaymentAnalysis = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { 
+      desde = null, 
+      hasta = null,
+      metodoPago = 'all',
+      format = 'json'
+    } = req.query;
+
+    const query = {};
+
+    // Filtro por fechas
+    if (desde || hasta) {
+      query.fechaAbono = {};
+      if (desde) query.fechaAbono.$gte = new Date(desde);
+      if (hasta) query.fechaAbono.$lte = new Date(hasta);
+    }
+
+    // Filtro por método de pago
+    if (metodoPago !== 'all') {
+      query.metodoPago = metodoPago;
+    }
+
+    const abonos = await db.collection('abonos')
+      .find(query)
+      .sort({ fechaAbono: -1 })
+      .toArray();
+
+    // Análisis por método de pago
+    const analisisPorMetodo = {};
+    abonos.forEach(abono => {
+      if (!analisisPorMetodo[abono.metodoPago]) {
+        analisisPorMetodo[abono.metodoPago] = {
+          cantidad: 0,
+          total: 0,
+          promedio: 0
+        };
+      }
+      analisisPorMetodo[abono.metodoPago].cantidad++;
+      analisisPorMetodo[abono.metodoPago].total += abono.montoAbono;
+    });
+
+    // Calcular promedios
+    Object.keys(analisisPorMetodo).forEach(metodo => {
+      const data = analisisPorMetodo[metodo];
+      data.promedio = data.total / data.cantidad;
+    });
+
+    // Análisis por día de la semana
+    const analisisPorDia = {};
+    abonos.forEach(abono => {
+      const dia = new Date(abono.fechaAbono).toLocaleDateString('es-CO', { weekday: 'long' });
+      if (!analisisPorDia[dia]) {
+        analisisPorDia[dia] = { cantidad: 0, total: 0 };
+      }
+      analisisPorDia[dia].cantidad++;
+      analisisPorDia[dia].total += abono.montoAbono;
+    });
+
+    // Análisis por mes
+    const analisisPorMes = {};
+    abonos.forEach(abono => {
+      const mes = new Date(abono.fechaAbono).toLocaleDateString('es-CO', { year: 'numeric', month: 'long' });
+      if (!analisisPorMes[mes]) {
+        analisisPorMes[mes] = { cantidad: 0, total: 0 };
+      }
+      analisisPorMes[mes].cantidad++;
+      analisisPorMes[mes].total += abono.montoAbono;
+    });
+
+    // Top clientes que más pagan
+    const pagosPorCliente = {};
+    abonos.forEach(abono => {
+      const clienteId = abono.clienteId.toString();
+      if (!pagosPorCliente[clienteId]) {
+        pagosPorCliente[clienteId] = {
+          cantidad: 0,
+          total: 0,
+          cliente: null
+        };
+      }
+      pagosPorCliente[clienteId].cantidad++;
+      pagosPorCliente[clienteId].total += abono.montoAbono;
+    });
+
+    // Obtener información de clientes
+    for (const clienteId of Object.keys(pagosPorCliente)) {
+      const cliente = await db.collection('clientes').findOne({ _id: new ObjectId(clienteId) });
+      if (cliente) {
+        pagosPorCliente[clienteId].cliente = {
+          nombre: cliente.nombre,
+          email: cliente.email,
+          telefono: cliente.telefono
+        };
+      }
+    }
+
+    const topClientes = Object.values(pagosPorCliente)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
+
+    const totales = {
+      totalAbonos: abonos.length,
+      totalRecaudado: abonos.reduce((sum, a) => sum + a.montoAbono, 0),
+      promedioAbono: abonos.length > 0 
+        ? abonos.reduce((sum, a) => sum + a.montoAbono, 0) / abonos.length 
+        : 0,
+      metodosPagoUtilizados: Object.keys(analisisPorMetodo).length
+    };
+
+    const analisis = {
+      filtros: { desde, hasta, metodoPago },
+      totales,
+      analisisPorMetodo,
+      analisisPorDia,
+      analisisPorMes,
+      topClientes
+    };
+
+    if (format === 'pdf') {
+      const doc = new PDFDocument();
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename=analisis-pagos.pdf');
+      doc.pipe(res);
+
+      doc.fontSize(18).text('Análisis de Pagos', { align: 'center' });
+      doc.moveDown();
+      
+      doc.fontSize(12).text(`Período: ${desde || 'Inicio'} - ${hasta || 'Actual'}`);
+      doc.text(`Total Abonos: ${totales.totalAbonos}`);
+      doc.text(`Total Recaudado: $${totales.totalRecaudado.toLocaleString()}`);
+      doc.text(`Promedio por Abono: $${totales.promedioAbono.toLocaleString()}`);
+      doc.moveDown();
+
+      doc.fontSize(14).text('Análisis por Método de Pago', { underline: true });
+      Object.entries(analisisPorMetodo).forEach(([metodo, data]) => {
+        doc.text(`${metodo}: ${data.cantidad} abonos - $${data.total.toLocaleString()} (Promedio: $${data.promedio.toLocaleString()})`);
+      });
+      doc.moveDown();
+
+      doc.fontSize(14).text('Top 10 Clientes', { underline: true });
+      topClientes.forEach((cliente, index) => {
+        doc.text(`${index + 1}. ${cliente.cliente?.nombre || 'Cliente no encontrado'}: $${cliente.total.toLocaleString()} (${cliente.cantidad} abonos)`);
+      });
+
+      doc.end();
+    } else if (format === 'excel') {
+      const workbook = new ExcelJS.Workbook();
+      
+      // Hoja de resumen
+      const resumenSheet = workbook.addWorksheet('Resumen');
+      resumenSheet.addRow(['Métrica', 'Valor']);
+      resumenSheet.addRow(['Total Abonos', totales.totalAbonos]);
+      resumenSheet.addRow(['Total Recaudado', totales.totalRecaudado]);
+      resumenSheet.addRow(['Promedio por Abono', totales.promedioAbono]);
+      resumenSheet.addRow(['Métodos de Pago Utilizados', totales.metodosPagoUtilizados]);
+
+      // Hoja de análisis por método
+      const metodoSheet = workbook.addWorksheet('Por Método de Pago');
+      metodoSheet.columns = [
+        { header: 'Método de Pago', key: 'metodo', width: 20 },
+        { header: 'Cantidad', key: 'cantidad', width: 15 },
+        { header: 'Total', key: 'total', width: 15 },
+        { header: 'Promedio', key: 'promedio', width: 15 }
+      ];
+      Object.entries(analisisPorMetodo).forEach(([metodo, data]) => {
+        metodoSheet.addRow({
+          metodo,
+          cantidad: data.cantidad,
+          total: data.total,
+          promedio: data.promedio
+        });
+      });
+
+      // Hoja de top clientes
+      const clientesSheet = workbook.addWorksheet('Top Clientes');
+      clientesSheet.columns = [
+        { header: 'Cliente', key: 'cliente', width: 30 },
+        { header: 'Email', key: 'email', width: 25 },
+        { header: 'Teléfono', key: 'telefono', width: 15 },
+        { header: 'Total Pagado', key: 'total', width: 15 },
+        { header: 'Cantidad Abonos', key: 'cantidad', width: 15 }
+      ];
+      topClientes.forEach(cliente => {
+        clientesSheet.addRow({
+          cliente: cliente.cliente?.nombre || 'Cliente no encontrado',
+          email: cliente.cliente?.email || '',
+          telefono: cliente.cliente?.telefono || '',
+          total: cliente.total,
+          cantidad: cliente.cantidad
+        });
+      });
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename=analisis-pagos.xlsx');
+      await workbook.xlsx.write(res);
+      res.end();
+    } else {
+      return res.status(200).json({
+        status: "Success",
+        message: "Análisis de pagos generado correctamente.",
+        data: analisis
+      });
+    }
+
+  } catch (error) {
+    console.error('Error al generar análisis de pagos:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al generar el análisis de pagos.",
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
     registertrabajador,
     loginTrabajador,
@@ -1703,6 +4216,28 @@ module.exports = {
     loginUser,
     exportReportPDF,
     deleteUser,
-    searchCustomersapi
+    searchCustomersapi,
+    createClient,
+    getClients,
+    getClientById,
+    updateClient,
+    deleteClient,
+    searchClients,
+    createInvoice,
+    getInvoices,
+    getInvoiceById,
+    updateInvoiceStatus,
+    getInvoicesByClient,
+    createPayment,
+    getPaymentsByInvoice,
+    getPaymentsByClient,
+    getAccountStatus,
+    getPortfolioReport,
+    getOverdueInvoices,
+    getPaymentAnalysis,
+    createCategory,
+    getCategories,
+    updateCategory,
+    deleteCategory
     
 };

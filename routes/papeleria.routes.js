@@ -2,7 +2,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 const router = express.Router();
 const mongoose = require('mongoose');
-const { registertrabajador, loginTrabajador,logoutTrabajador,newProduct,getProducts,updateProduct,deleteProduct,assignProductToInventory,getInventoryProducts,updateInventoryProduct,deleteInventoryProduct,getProductsWithStock,createSale,checkAndReserveSaleCode,releaseSaleCode,getLastRegisteredSaleCode,getAllSales,getReportsData,registeradmin,loginadmin,getSpecificDayReport,getDashboardData,getUsers,createUser,updateUser,loginUser,exportReportPDF,deleteUser,searchCustomersapi} =require('./controllers/papeleriaControllers');
+const { registertrabajador, loginTrabajador,logoutTrabajador,newProduct,getProducts,updateProduct,deleteProduct,assignProductToInventory,getInventoryProducts,updateInventoryProduct,deleteInventoryProduct,getProductsWithStock,createSale,checkAndReserveSaleCode,releaseSaleCode,getLastRegisteredSaleCode,getAllSales,getReportsData,registeradmin,loginadmin,getSpecificDayReport,getDashboardData,getUsers,createUser,updateUser,loginUser,exportReportPDF,deleteUser,searchCustomersapi,createClient,getClients,getClientById,updateClient,deleteClient,searchClients,createInvoice,getInvoices,getInvoiceById,updateInvoiceStatus,getInvoicesByClient,createPayment,getPaymentsByInvoice,getPaymentsByClient,getAccountStatus,getPortfolioReport,getOverdueInvoices,getPaymentAnalysis,createCategory,getCategories,updateCategory,deleteCategory} =require('./controllers/papeleriaControllers');
 
 dotenv.config({ path: './config.env' }); 
 
@@ -45,6 +45,40 @@ mongoose.connect(process.env.MONGO_URI)
    router.post('/reportsapi/export', exportReportPDF);
    router.delete('/deleteUserapi/:id', deleteUser);
    router.get('/searchCustomersapi', searchCustomersapi);
+   
+   // Rutas de Clientes Mejoradas
+   router.post('/clientes', createClient);
+   router.get('/clientes', getClients);
+   router.get('/clientes/:id', getClientById);
+   router.put('/clientes/:id', updateClient);
+   router.delete('/clientes/:id', deleteClient);
+   router.get('/clientes/search', searchClients);
+   
+   // Rutas de Facturación
+   router.post('/facturas', createInvoice);
+   router.get('/facturas', getInvoices);
+   router.get('/facturas/:id', getInvoiceById);
+   router.put('/facturas/:id/estado', updateInvoiceStatus);
+   router.get('/facturas/cliente/:clienteId', getInvoicesByClient);
+   
+   // Rutas de Abonos
+   router.post('/abonos', createPayment);
+   router.get('/abonos/factura/:facturaId', getPaymentsByInvoice);
+   router.get('/abonos/cliente/:clienteId', getPaymentsByClient);
+   
+   // Rutas de Estado de Cuenta
+   router.get('/estado-cuenta/:clienteId', getAccountStatus);
+   
+   // Rutas de Reportes de Cartera
+   router.get('/reportes/cartera', getPortfolioReport);
+   router.get('/reportes/facturas-vencidas', getOverdueInvoices);
+   router.get('/reportes/analisis-pagos', getPaymentAnalysis);
+   
+   // Rutas de Categorías
+   router.post('/categorias', createCategory);
+   router.get('/categorias', getCategories);
+   router.put('/categorias/:id', updateCategory);
+   router.delete('/categorias/:id', deleteCategory);
 
 
 
