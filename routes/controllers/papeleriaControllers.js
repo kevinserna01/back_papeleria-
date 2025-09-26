@@ -1140,7 +1140,7 @@ const getReportsData = async (req, res) => {
   try {
     const db = await getDb();
     const ventasCol = db.collection('ventas');
-    const trabajadoresCol = db.collection('trabajadores');
+    const usuariosCol = db.collection('usuarios');
 
     const { 
       startDate, 
@@ -1192,8 +1192,8 @@ const getReportsData = async (req, res) => {
     // Función para obtener información de trabajadores
     const getTrabajadorInfo = async (correo) => {
       if (!correo) return { nombre: 'Sistema', correo: 'sistema' };
-      const trabajador = await trabajadoresCol.findOne({ correo });
-      return trabajador ? { nombre: trabajador.nombre, correo: trabajador.correo } : { nombre: 'Desconocido', correo };
+      const trabajador = await usuariosCol.findOne({ email: correo, role: 'worker' });
+      return trabajador ? { nombre: trabajador.name, correo: trabajador.email } : { nombre: 'Desconocido', correo };
     };
 
     // 1. VENTAS POR DEPARTAMENTOS
@@ -1206,12 +1206,20 @@ const getReportsData = async (req, res) => {
           departamentos[departamento] = {
             departamento,
             totalVentas: 0,
+            totalVentasSinDescuento: 0,
+            totalDescuentos: 0,
             cantidadVentas: 0,
+            ventasConDescuento: 0,
             clientes: new Set()
           };
         }
         departamentos[departamento].totalVentas += v.totalVenta;
+        departamentos[departamento].totalVentasSinDescuento += (v.totalVentaSinDescuento || v.totalVenta);
+        departamentos[departamento].totalDescuentos += (v.montoDescuento || 0);
         departamentos[departamento].cantidadVentas += 1;
+        if (v.descuentoAplicado > 0) {
+          departamentos[departamento].ventasConDescuento += 1;
+        }
         if (v.cliente?.nombre) {
           departamentos[departamento].clientes.add(v.cliente.nombre);
         }
@@ -1220,7 +1228,10 @@ const getReportsData = async (req, res) => {
       return Object.values(departamentos).map(d => ({
         Departamento: d.departamento,
         TotalVentas: d.totalVentas,
+        TotalVentasSinDescuento: d.totalVentasSinDescuento,
+        TotalDescuentos: d.totalDescuentos,
         CantidadVentas: d.cantidadVentas,
+        VentasConDescuento: d.ventasConDescuento,
         ClientesUnicos: d.clientes.size
       })).sort((a, b) => b.TotalVentas - a.TotalVentas);
     };
@@ -1308,13 +1319,21 @@ const getReportsData = async (req, res) => {
             trabajador: trabajadorInfo.nombre,
             correo: trabajadorInfo.correo,
             totalVentas: 0,
+            totalVentasSinDescuento: 0,
+            totalDescuentos: 0,
             cantidadVentas: 0,
+            ventasConDescuento: 0,
             clientes: new Set()
           };
         }
         
         trabajadores[key].totalVentas += v.totalVenta;
+        trabajadores[key].totalVentasSinDescuento += (v.totalVentaSinDescuento || v.totalVenta);
+        trabajadores[key].totalDescuentos += (v.montoDescuento || 0);
         trabajadores[key].cantidadVentas += 1;
+        if (v.descuentoAplicado > 0) {
+          trabajadores[key].ventasConDescuento += 1;
+        }
         if (v.cliente?.nombre) {
           trabajadores[key].clientes.add(v.cliente.nombre);
         }
@@ -1324,7 +1343,10 @@ const getReportsData = async (req, res) => {
         Trabajador: t.trabajador,
         Correo: t.correo,
         TotalVentas: t.totalVentas,
+        TotalVentasSinDescuento: t.totalVentasSinDescuento,
+        TotalDescuentos: t.totalDescuentos,
         CantidadVentas: t.cantidadVentas,
+        VentasConDescuento: t.ventasConDescuento,
         ClientesAtendidos: t.clientes.size
       })).sort((a, b) => b.TotalVentas - a.TotalVentas);
     };
@@ -1456,21 +1478,30 @@ const getReportsData = async (req, res) => {
     // 9. RESUMEN GENERAL
     const buildResumenGeneral = () => {
       const totalVentas = ventas.reduce((sum, v) => sum + v.totalVenta, 0);
+      const totalVentasSinDescuento = ventas.reduce((sum, v) => sum + (v.totalVentaSinDescuento || v.totalVenta), 0);
+      const totalDescuentos = ventas.reduce((sum, v) => sum + (v.montoDescuento || 0), 0);
+      const ventasConDescuento = ventas.filter(v => v.descuentoAplicado > 0).length;
       const cantidadVentas = ventas.length;
       const clientesUnicos = new Set(ventas.map(v => v.cliente?.nombre).filter(Boolean)).size;
       const productosVendidos = new Set(ventas.flatMap(v => v.productos.map(p => p.name))).size;
       const categoriasVendidas = new Set(ventas.flatMap(v => v.productos.map(p => p.categoria || 'Sin categoría'))).size;
+      const trabajadoresUnicos = new Set(ventas.map(v => v.trabajador?.correo).filter(Boolean)).size;
 
       return [{
         Periodo: periodo,
         FechaInicio: moment(start).tz('America/Bogota').format('YYYY-MM-DD'),
         FechaFin: moment(end).tz('America/Bogota').format('YYYY-MM-DD'),
         TotalVentas: totalVentas,
+        TotalVentasSinDescuento: totalVentasSinDescuento,
+        TotalDescuentos: totalDescuentos,
         CantidadVentas: cantidadVentas,
+        VentasConDescuento: ventasConDescuento,
         ClientesUnicos: clientesUnicos,
+        TrabajadoresUnicos: trabajadoresUnicos,
         ProductosVendidos: productosVendidos,
         CategoriasVendidas: categoriasVendidas,
-        PromedioVenta: cantidadVentas > 0 ? (totalVentas / cantidadVentas).toFixed(2) : 0
+        PromedioVenta: cantidadVentas > 0 ? (totalVentas / cantidadVentas).toFixed(2) : 0,
+        PromedioDescuento: ventasConDescuento > 0 ? (totalDescuentos / ventasConDescuento).toFixed(2) : 0
       }];
     };
 
@@ -1758,13 +1789,26 @@ const getSpecificDayReport = async (req, res) => {
     const resumen = ventas.map(v => ({
       Código: v.code,
       Cliente: v.cliente?.nombre || 'Sin cliente',
+      Documento: v.cliente?.document || 'N/A',
+      Email: v.cliente?.email || 'N/A',
+      Teléfono: v.cliente?.phone || 'N/A',
+      Trabajador: v.trabajador?.nombre || 'Sin trabajador',
+      EmailTrabajador: v.trabajador?.correo || 'N/A',
       Total: v.totalVenta,
+      TotalSinDescuento: v.totalVentaSinDescuento || v.totalVenta,
+      Descuento: v.descuentoAplicado || 0,
+      MontoDescuento: v.montoDescuento || 0,
       Método: v.metodoPago,
       Fecha: moment(v.fecha).tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
     }));
 
     const total = [{
-      TotalVentas: ventas.reduce((sum, v) => sum + v.totalVenta, 0)
+      TotalVentas: ventas.reduce((sum, v) => sum + v.totalVenta, 0),
+      TotalVentasSinDescuento: ventas.reduce((sum, v) => sum + (v.totalVentaSinDescuento || v.totalVenta), 0),
+      TotalDescuentos: ventas.reduce((sum, v) => sum + (v.montoDescuento || 0), 0),
+      VentasConDescuento: ventas.filter(v => v.descuentoAplicado > 0).length,
+      CantidadVentas: ventas.length,
+      PromedioVenta: ventas.length > 0 ? (ventas.reduce((sum, v) => sum + v.totalVenta, 0) / ventas.length).toFixed(2) : 0
     }];
 
     const productosVendidos = {};
@@ -1786,7 +1830,8 @@ const getSpecificDayReport = async (req, res) => {
           categoriasMap[cat] = {
             Categoria: cat,
             CantidadVendida: 0,
-            TotalGenerado: 0
+            TotalGenerado: 0,
+            PrecioUnitario: p.precioUnitario || 0
           };
         }
         categoriasMap[cat].CantidadVendida += p.cantidad;
