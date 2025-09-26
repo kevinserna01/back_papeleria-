@@ -821,7 +821,8 @@ const createSale = async (req, res) => {
       metodoPago,
       cliente, // { name, document, email, phone }
       trabajador, // { correo, nombre }
-      totalVenta: totalVentaPayload // Total de venta del payload
+      totalVenta: totalVentaPayload, // Total de venta del payload
+      descuentoAplicado // Descuento aplicado (opcional)
     } = req.body;
     
     if (!code || typeof code !== 'string') {
@@ -932,7 +933,21 @@ const createSale = async (req, res) => {
     }
     
     // Usar totalVenta del payload si está disponible, sino usar el calculado
-    const totalVentaFinal = totalVentaPayload || totalVenta;
+    const totalVentaSinDescuento = totalVentaPayload || totalVenta;
+    
+    // Validar descuento si está especificado
+    if (descuentoAplicado !== undefined && descuentoAplicado !== null) {
+      if (typeof descuentoAplicado !== 'number' || descuentoAplicado < 0 || descuentoAplicado > 100) {
+        return res.status(400).json({
+          status: "Error",
+          message: "El descuento debe ser un número entre 0 y 100."
+        });
+      }
+    }
+    
+    // Calcular descuento usando la función helper
+    const descuentoInfo = calcularDescuento(totalVentaSinDescuento, descuentoAplicado);
+    const totalVentaFinal = descuentoInfo.totalConDescuento;
     
     // Guardar cliente si es válido y no existe
     let clienteGuardado = null;
@@ -967,6 +982,9 @@ const createSale = async (req, res) => {
       trabajador: trabajadorInfo, // NUEVO: Información del trabajador
       productos: detalleVenta,
       totalVenta: totalVentaFinal,
+      totalVentaSinDescuento: totalVentaSinDescuento, // Total antes del descuento
+      descuentoAplicado: descuentoInfo.descuentoAplicado, // Porcentaje de descuento
+      montoDescuento: descuentoInfo.montoDescuento, // Monto del descuento en pesos
       metodoPago,
       createdAt: new Date()
     };
@@ -988,6 +1006,26 @@ const createSale = async (req, res) => {
   }
 };
   
+
+// Función helper para calcular descuentos
+const calcularDescuento = (totalVenta, descuentoPorcentaje) => {
+  if (!descuentoPorcentaje || descuentoPorcentaje <= 0) {
+    return {
+      montoDescuento: 0,
+      totalConDescuento: totalVenta,
+      descuentoAplicado: 0
+    };
+  }
+  
+  const montoDescuento = (totalVenta * descuentoPorcentaje) / 100;
+  const totalConDescuento = totalVenta - montoDescuento;
+  
+  return {
+    montoDescuento: Math.round(montoDescuento * 100) / 100, // Redondear a 2 decimales
+    totalConDescuento: Math.round(totalConDescuento * 100) / 100,
+    descuentoAplicado: descuentoPorcentaje
+  };
+};
 
 const checkAndReserveSaleCode = async (req, res) => {
   try {
