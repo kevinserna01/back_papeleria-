@@ -848,7 +848,7 @@ const createSale = async (req, res) => {
     const inventarioCol = db.collection('inventario');
     const productosCol = db.collection('productos');
     const clientesCol = db.collection('clientes');
-    const trabajadoresCol = db.collection('trabajadores');
+    const usuariosCol = db.collection('usuarios');
     
     // Verificar si ya existe una venta con ese código
     const ventaExistente = await ventasCol.findOne({ code });
@@ -862,12 +862,15 @@ const createSale = async (req, res) => {
     // Validar y obtener información del trabajador
     let trabajadorInfo = null;
     if (trabajador && trabajador.correo) {
-      const trabajadorEncontrado = await trabajadoresCol.findOne({ correo: trabajador.correo });
+      const trabajadorEncontrado = await usuariosCol.findOne({ 
+        email: trabajador.correo, 
+        role: 'worker' 
+      });
       if (trabajadorEncontrado) {
         trabajadorInfo = {
-          correo: trabajadorEncontrado.correo,
-          nombre: trabajadorEncontrado.nombre,
-          cedula: trabajadorEncontrado.cedula
+          correo: trabajadorEncontrado.email,
+          nombre: trabajadorEncontrado.name,
+          cedula: trabajadorEncontrado.cedula || 'N/A'
         };
       } else {
         return res.status(404).json({
