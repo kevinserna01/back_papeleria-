@@ -4,7 +4,8 @@ const PDFDocument = require('pdfkit');
 const ExcelJS = require('exceljs');
 const fs = require('fs');
 const { ObjectId } = require('mongodb');
-const { getDb }  = require('../../database/mongo'); 
+const { getDb }  = require('../../database/mongo');
+const nodemailer = require('nodemailer'); 
 
 
 
@@ -2509,6 +2510,456 @@ const generateInvoicePDF = async (req, res) => {
     });
   }
 };
+// ---------------------------------ENVIAR_FACTURA_POR_EMAIL--------------------------------------------------------------
+
+const sendInvoiceToN8N = async (req, res) => {
+  try {
+    const { saleId, email, subject, message } = req.body;
+    const db = await getDb();
+    
+    // Validaciones
+    if (!saleId || !email) {
+      return res.status(400).json({
+        status: "Error",
+        message: "saleId y email son obligatorios"
+      });
+    }
+
+    // Validar formato de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Formato de email inválido"
+      });
+    }
+
+    // Buscar la venta
+    const venta = await db.collection('ventas').findOne({ _id: new ObjectId(saleId) });
+    if (!venta) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Venta no encontrada"
+      });
+    }
+
+    // Generar PDF en Base64 para n8n
+    const pdfBase64 = await generateInvoicePDFBase64(venta);
+
+    // Preparar datos para n8n
+    const n8nData = {
+      // Datos del cliente
+      nombre: venta.cliente.name,
+      email: email,
+      documento: venta.cliente.document,
+      telefono: venta.cliente.phone,
+      
+      // Datos de la factura
+      codigoFactura: `VTA-${venta.code}`,
+      fecha: moment(venta.fecha).format('DD/MM/YYYY'),
+      hora: venta.hora,
+      total: venta.totalVenta,
+      metodoPago: venta.metodoPago,
+      
+      // Datos del vendedor
+      vendedor: venta.trabajador.nombre,
+      emailVendedor: venta.trabajador.correo,
+      
+      // Productos
+      productos: venta.productos.map(p => ({
+        codigo: p.code,
+        nombre: p.name,
+        cantidad: p.cantidad,
+        precioUnitario: p.precioUnitario,
+        total: p.total
+      })),
+      
+      // PDF en Base64
+      pdfBase64: pdfBase64,
+      nombreArchivo: `factura-VTA-${venta.code}.pdf`,
+      
+      // Asunto y mensaje personalizados
+      asunto: subject || `Factura VTA-${venta.code} - Papelería Kevin`,
+      mensaje: message || `Estimado/a ${venta.cliente.name}, adjunto encontrará la factura de su compra.`,
+      
+      // Metadatos
+      saleId: saleId,
+      timestamp: moment().tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
+    };
+
+    // Enviar a n8n webhook
+    const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || 'http://localhost:5678/webhook-test/v1/papeleria/send-invoice-email';
+    
+    const response = await fetch(n8nWebhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(n8nData)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Error enviando a n8n: ${response.status}`);
+    }
+
+    const n8nResponse = await response.json();
+
+    res.status(200).json({
+      status: "Success",
+      message: "Datos enviados a n8n correctamente",
+      data: {
+        saleId: saleId,
+        email: email,
+        invoiceCode: `VTA-${venta.code}`,
+        n8nResponse: n8nResponse,
+        sentAt: moment().tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
+      }
+    });
+
+  } catch (error) {
+    console.error('Error enviando datos a n8n:', error);
+    res.status(500).json({
+      status: "Error",
+      message: "Error al enviar los datos a n8n",
+      error: error.message
+    });
+  }
+};
+
+// Función auxiliar para generar PDF en Base64
+const generateInvoicePDFBase64 = async (venta) => {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ 
+      size: 'A4',
+      margin: 50,
+      info: {
+        Title: `Factura VTA-${venta.code}`,
+        Author: 'Sistema Papelería',
+        Subject: 'Factura de Venta'
+      }
+    });
+
+    const chunks = [];
+    
+    doc.on('data', chunk => chunks.push(chunk));
+    doc.on('end', () => {
+      const pdfBuffer = Buffer.concat(chunks);
+      const base64 = pdfBuffer.toString('base64');
+      resolve(base64);
+    });
+    doc.on('error', reject);
+
+    // Diseño de la factura (mismo que en generateInvoicePDF)
+    doc.fontSize(20).text('FACTURA DE VENTA', 50, 50, { align: 'center' });
+    
+    // Información de la empresa
+    doc.fontSize(12)
+       .text('PAPELERÍA KEVIN', 50, 100)
+       .text('NIT: 123456789-0', 50, 120)
+       .text('Dirección: Medellín, Colombia', 50, 140)
+       .text('Teléfono: +57 300 123 4567', 50, 160);
+
+    // Información de la factura
+    doc.text(`No. Factura: VTA-${venta.code}`, 400, 100)
+       .text(`Fecha: ${moment(venta.fecha).format('DD/MM/YYYY')}`, 400, 120)
+       .text(`Hora: ${venta.hora}`, 400, 140);
+
+    // Información del cliente
+    doc.fontSize(14).text('DATOS DEL CLIENTE', 50, 200);
+    doc.fontSize(12)
+       .text(`Nombre: ${venta.cliente.name}`, 50, 220)
+       .text(`Documento: ${venta.cliente.document}`, 50, 240)
+       .text(`Email: ${venta.cliente.email}`, 50, 260)
+       .text(`Teléfono: ${venta.cliente.phone}`, 50, 280);
+
+    // Información del trabajador
+    doc.fontSize(14).text('VENDEDOR', 50, 320);
+    doc.fontSize(12)
+       .text(`Nombre: ${venta.trabajador.nombre}`, 50, 340)
+       .text(`Email: ${venta.trabajador.correo}`, 50, 360);
+
+    // Tabla de productos
+    let yPosition = 400;
+    doc.fontSize(14).text('DETALLE DE PRODUCTOS', 50, yPosition);
+    yPosition += 30;
+
+    // Headers de la tabla
+    doc.fontSize(10)
+       .text('Código', 50, yPosition)
+       .text('Producto', 120, yPosition)
+       .text('Cantidad', 300, yPosition)
+       .text('Precio Unit.', 380, yPosition)
+       .text('Total', 480, yPosition);
+    
+    yPosition += 20;
+    
+    // Línea separadora
+    doc.moveTo(50, yPosition).lineTo(550, yPosition).stroke();
+    yPosition += 10;
+
+    // Productos
+    venta.productos.forEach(producto => {
+      doc.fontSize(9)
+         .text(producto.code, 50, yPosition)
+         .text(producto.name, 120, yPosition)
+         .text(producto.cantidad.toString(), 300, yPosition)
+         .text(`$${producto.precioUnitario.toLocaleString()}`, 380, yPosition)
+         .text(`$${producto.total.toLocaleString()}`, 480, yPosition);
+      yPosition += 20;
+    });
+
+    // Totales
+    yPosition += 20;
+    doc.moveTo(50, yPosition).lineTo(550, yPosition).stroke();
+    yPosition += 20;
+
+    doc.fontSize(12)
+       .text('SUBTOTAL:', 400, yPosition)
+       .text(`$${venta.totalVentaSinDescuento.toLocaleString()}`, 480, yPosition);
+    
+    if (venta.descuentoAplicado > 0) {
+      yPosition += 20;
+      doc.text('DESCUENTO:', 400, yPosition)
+         .text(`-$${venta.montoDescuento.toLocaleString()}`, 480, yPosition);
+    }
+
+    yPosition += 20;
+    doc.fontSize(14).text('TOTAL:', 400, yPosition)
+       .text(`$${venta.totalVenta.toLocaleString()}`, 480, yPosition);
+
+    // Método de pago
+    yPosition += 40;
+    doc.fontSize(12).text(`Método de Pago: ${venta.metodoPago}`, 50, yPosition);
+
+    // Pie de página
+    yPosition += 60;
+    doc.fontSize(10)
+       .text('Gracias por su compra', 50, yPosition, { align: 'center' })
+       .text('Sistema de Papelería - Medellín', 50, yPosition + 20, { align: 'center' });
+
+    doc.end();
+  });
+};
+
+const sendInvoiceByEmail = async (req, res) => {
+  try {
+    const { saleId, email, subject, message } = req.body;
+    const db = await getDb();
+    
+    // Validaciones
+    if (!saleId || !email) {
+      return res.status(400).json({
+        status: "Error",
+        message: "saleId y email son obligatorios"
+      });
+    }
+
+    // Validar formato de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Formato de email inválido"
+      });
+    }
+
+    // Buscar la venta
+    const venta = await db.collection('ventas').findOne({ _id: new ObjectId(saleId) });
+    if (!venta) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Venta no encontrada"
+      });
+    }
+
+    // Generar PDF en memoria
+    const pdfBuffer = await generateInvoicePDFBuffer(venta);
+
+    // Configurar transporter de nodemailer
+    const transporter = nodemailer.createTransporter({
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: process.env.SMTP_PORT || 587,
+      secure: false, // true para 465, false para otros puertos
+      auth: {
+        user: process.env.SMTP_USER || 'tu-email@gmail.com',
+        pass: process.env.SMTP_PASS || 'tu-password-app'
+      }
+    });
+
+    // Configurar el email
+    const mailOptions = {
+      from: process.env.SMTP_FROM || 'noreply@papeleria.com',
+      to: email,
+      subject: subject || `Factura VTA-${venta.code} - Papelería Kevin`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333; text-align: center;">Factura de Venta</h2>
+          <p>Estimado/a <strong>${venta.cliente.name}</strong>,</p>
+          <p>Adjunto encontrará la factura correspondiente a su compra realizada el ${moment(venta.fecha).format('DD/MM/YYYY')} a las ${venta.hora}.</p>
+          
+          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <h3 style="margin-top: 0; color: #333;">Detalles de la Factura:</h3>
+            <p><strong>Número de Factura:</strong> VTA-${venta.code}</p>
+            <p><strong>Fecha:</strong> ${moment(venta.fecha).format('DD/MM/YYYY')}</p>
+            <p><strong>Hora:</strong> ${venta.hora}</p>
+            <p><strong>Total:</strong> $${venta.totalVenta.toLocaleString()}</p>
+            <p><strong>Método de Pago:</strong> ${venta.metodoPago}</p>
+          </div>
+
+          ${message ? `<p><strong>Mensaje adicional:</strong><br>${message}</p>` : ''}
+
+          <p>Gracias por su compra en Papelería Kevin.</p>
+          <p>Si tiene alguna pregunta, no dude en contactarnos.</p>
+          
+          <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+          <p style="font-size: 12px; color: #666; text-align: center;">
+            Papelería Kevin<br>
+            Medellín, Colombia<br>
+            Teléfono: +57 300 123 4567
+          </p>
+        </div>
+      `,
+      attachments: [{
+        filename: `factura-VTA-${venta.code}.pdf`,
+        content: pdfBuffer,
+        contentType: 'application/pdf'
+      }]
+    };
+
+    // Enviar el email
+    await transporter.sendMail(mailOptions);
+
+    res.status(200).json({
+      status: "Success",
+      message: "Factura enviada por email correctamente",
+      data: {
+        saleId: saleId,
+        email: email,
+        invoiceCode: `VTA-${venta.code}`,
+        sentAt: moment().tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
+      }
+    });
+
+  } catch (error) {
+    console.error('Error enviando factura por email:', error);
+    res.status(500).json({
+      status: "Error",
+      message: "Error al enviar la factura por email",
+      error: error.message
+    });
+  }
+};
+
+// Función auxiliar para generar PDF en buffer
+const generateInvoicePDFBuffer = async (venta) => {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ 
+      size: 'A4',
+      margin: 50,
+      info: {
+        Title: `Factura VTA-${venta.code}`,
+        Author: 'Sistema Papelería',
+        Subject: 'Factura de Venta'
+      }
+    });
+
+    const chunks = [];
+    
+    doc.on('data', chunk => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    // Diseño de la factura (mismo que en generateInvoicePDF)
+    doc.fontSize(20).text('FACTURA DE VENTA', 50, 50, { align: 'center' });
+    
+    // Información de la empresa
+    doc.fontSize(12)
+       .text('PAPELERÍA KEVIN', 50, 100)
+       .text('NIT: 123456789-0', 50, 120)
+       .text('Dirección: Medellín, Colombia', 50, 140)
+       .text('Teléfono: +57 300 123 4567', 50, 160);
+
+    // Información de la factura
+    doc.text(`No. Factura: VTA-${venta.code}`, 400, 100)
+       .text(`Fecha: ${moment(venta.fecha).format('DD/MM/YYYY')}`, 400, 120)
+       .text(`Hora: ${venta.hora}`, 400, 140);
+
+    // Información del cliente
+    doc.fontSize(14).text('DATOS DEL CLIENTE', 50, 200);
+    doc.fontSize(12)
+       .text(`Nombre: ${venta.cliente.name}`, 50, 220)
+       .text(`Documento: ${venta.cliente.document}`, 50, 240)
+       .text(`Email: ${venta.cliente.email}`, 50, 260)
+       .text(`Teléfono: ${venta.cliente.phone}`, 50, 280);
+
+    // Información del trabajador
+    doc.fontSize(14).text('VENDEDOR', 50, 320);
+    doc.fontSize(12)
+       .text(`Nombre: ${venta.trabajador.nombre}`, 50, 340)
+       .text(`Email: ${venta.trabajador.correo}`, 50, 360);
+
+    // Tabla de productos
+    let yPosition = 400;
+    doc.fontSize(14).text('DETALLE DE PRODUCTOS', 50, yPosition);
+    yPosition += 30;
+
+    // Headers de la tabla
+    doc.fontSize(10)
+       .text('Código', 50, yPosition)
+       .text('Producto', 120, yPosition)
+       .text('Cantidad', 300, yPosition)
+       .text('Precio Unit.', 380, yPosition)
+       .text('Total', 480, yPosition);
+    
+    yPosition += 20;
+    
+    // Línea separadora
+    doc.moveTo(50, yPosition).lineTo(550, yPosition).stroke();
+    yPosition += 10;
+
+    // Productos
+    venta.productos.forEach(producto => {
+      doc.fontSize(9)
+         .text(producto.code, 50, yPosition)
+         .text(producto.name, 120, yPosition)
+         .text(producto.cantidad.toString(), 300, yPosition)
+         .text(`$${producto.precioUnitario.toLocaleString()}`, 380, yPosition)
+         .text(`$${producto.total.toLocaleString()}`, 480, yPosition);
+      yPosition += 20;
+    });
+
+    // Totales
+    yPosition += 20;
+    doc.moveTo(50, yPosition).lineTo(550, yPosition).stroke();
+    yPosition += 20;
+
+    doc.fontSize(12)
+       .text('SUBTOTAL:', 400, yPosition)
+       .text(`$${venta.totalVentaSinDescuento.toLocaleString()}`, 480, yPosition);
+    
+    if (venta.descuentoAplicado > 0) {
+      yPosition += 20;
+      doc.text('DESCUENTO:', 400, yPosition)
+         .text(`-$${venta.montoDescuento.toLocaleString()}`, 480, yPosition);
+    }
+
+    yPosition += 20;
+    doc.fontSize(14).text('TOTAL:', 400, yPosition)
+       .text(`$${venta.totalVenta.toLocaleString()}`, 480, yPosition);
+
+    // Método de pago
+    yPosition += 40;
+    doc.fontSize(12).text(`Método de Pago: ${venta.metodoPago}`, 50, yPosition);
+
+    // Pie de página
+    yPosition += 60;
+    doc.fontSize(10)
+       .text('Gracias por su compra', 50, yPosition, { align: 'center' })
+       .text('Sistema de Papelería - Medellín', 50, yPosition + 20, { align: 'center' });
+
+    doc.end();
+  });
+};
 
 const exportReportPDF = async (req, res) => {
   try {
@@ -4464,6 +4915,8 @@ module.exports = {
     getCategories,
     updateCategory,
     deleteCategory,
-    generateInvoicePDF
+    generateInvoicePDF,
+    sendInvoiceByEmail,
+    sendInvoiceToN8N
     
 };
