@@ -92,6 +92,7 @@ El backend envía estos datos a tu webhook de n8n:
   ],
   "pdfBase64": "JVBERi0xLjQKJdPr6eEKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPD4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA2MTIgNzkyXQovUmVzb3VyY2VzIDw8Ci9Gb250IDw8Ci9GMSA0IDAgUgo+Pgo+PgovQ29udGVudHMgNSAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL1R5cGUgL0ZvbnQKL1N1YnR5cGUgL1R5cGUxCi9CYXNlRm9udCAvSGVsdmV0aWNhCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9MZW5ndGggNDQKPj4Kc3RyZWFtCkJUCi9GMSAxMiBUZgoyNTAgNzAwIFRkCihGQUNUVVJBIFNFIFZFTlRBKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDI2OCAwMDAwMCBuIAowMDAwMDAwMzQxIDAwMDAwIG4gCnRyYWlsZXIKPDwKL1NpemUgNgovUm9vdCAxIDAgUgo+PgpzdGFydHhyZWYKNDI5CiUlRU9G",
   "nombreArchivo": "factura-VTA-027.pdf",
+  "pdfUrl": "https://back-papeleria-two.vercel.app/v1/papeleria/invoice-pdf/68d6bc80e8e7bad4fd954e1d",
   "asunto": "Gracias por tu compra, Pedro",
   "mensaje": "Estimado Pedro, adjunto encontrará la factura de su compra. Gracias por elegirnos.",
   "saleId": "68d6bc80e8e7bad4fd954e1d",
@@ -210,6 +211,7 @@ Tu flujo de n8n tendrá acceso a estas variables:
 | `productos` | Array de productos | `[{...}]` |
 | `pdfBase64` | PDF en Base64 | "JVBERi0xLjQK..." |
 | `nombreArchivo` | Nombre del archivo PDF | "factura-VTA-027.pdf" |
+| `pdfUrl` | URL directa al PDF | "https://back-papeleria-two.vercel.app/v1/papeleria/invoice-pdf/68d6bc80e8e7bad4fd954e1d" |
 | `asunto` | Asunto del email | "Gracias por tu compra, Pedro" |
 | `mensaje` | Mensaje del email | "Estimado Pedro..." |
 | `saleId` | ID de la venta | "68d6bc80e8e7bad4fd954e1d" |

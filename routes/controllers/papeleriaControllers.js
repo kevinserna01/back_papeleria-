@@ -2578,6 +2578,9 @@ const sendInvoiceToN8N = async (req, res) => {
       pdfBase64: pdfBase64,
       nombreArchivo: `factura-VTA-${venta.code}.pdf`,
       
+      // URL del PDF para acceso directo
+      pdfUrl: `${process.env.BASE_URL || 'https://back-papeleria-two.vercel.app'}/v1/papeleria/invoice-pdf/${saleId}`,
+      
       // Asunto y mensaje personalizados
       asunto: subject || `Factura VTA-${venta.code} - Papelería Kevin`,
       mensaje: message || `Estimado/a ${venta.cliente.name}, adjunto encontrará la factura de su compra.`,
@@ -2588,18 +2591,24 @@ const sendInvoiceToN8N = async (req, res) => {
     };
 
     // Enviar a n8n webhook
-    const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || 'http://localhost:5678/webhook-test/v1/papeleria/send-invoice-email';
+    const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || 'http://localhost:5678/webhook/v1/papeleria/send-invoice-n8n';	
+    
+    console.log('Enviando datos a n8n webhook:', n8nWebhookUrl);
+    console.log('Datos a enviar:', JSON.stringify(n8nData, null, 2));
     
     const response = await fetch(n8nWebhookUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(n8nData)
+      body: JSON.stringify(n8nData),
+      timeout: 30000 // 30 segundos de timeout
     });
 
     if (!response.ok) {
-      throw new Error(`Error enviando a n8n: ${response.status}`);
+      const errorText = await response.text();
+      console.error('Error response from n8n:', errorText);
+      throw new Error(`Error enviando a n8n: ${response.status} - ${errorText}`);
     }
 
     const n8nResponse = await response.json();
@@ -2618,10 +2627,31 @@ const sendInvoiceToN8N = async (req, res) => {
 
   } catch (error) {
     console.error('Error enviando datos a n8n:', error);
+    
+    // Determinar el tipo de error
+    let errorMessage = "Error al enviar los datos a n8n";
+    let errorDetails = error.message;
+    
+    if (error.message.includes('fetch failed')) {
+      errorMessage = "No se pudo conectar con el webhook de n8n";
+      errorDetails = "Verifica que la URL del webhook sea correcta y que n8n esté funcionando";
+    } else if (error.message.includes('timeout')) {
+      errorMessage = "Timeout al enviar datos a n8n";
+      errorDetails = "El webhook de n8n tardó demasiado en responder";
+    } else if (error.message.includes('ECONNREFUSED')) {
+      errorMessage = "Conexión rechazada por n8n";
+      errorDetails = "El webhook de n8n no está disponible o la URL es incorrecta";
+    }
+    
     res.status(500).json({
       status: "Error",
-      message: "Error al enviar los datos a n8n",
-      error: error.message
+      message: errorMessage,
+      error: errorDetails,
+      debug: {
+        webhookUrl: process.env.N8N_WEBHOOK_URL || 'No configurado',
+        saleId: req.body.saleId,
+        originalError: error.message
+      }
     });
   }
 };
@@ -2739,6 +2769,69 @@ const generateInvoicePDFBase64 = async (venta) => {
 
     doc.end();
   });
+};
+
+// Endpoint de prueba para verificar conectividad con n8n
+const testN8NConnection = async (req, res) => {
+  try {
+    const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || 'http://localhost:5678/webhook-test/v1/papeleria/send-invoice-email';
+    
+    console.log('Probando conexión con n8n:', n8nWebhookUrl);
+    
+    const testData = {
+      test: true,
+      message: "Prueba de conectividad desde backend",
+      timestamp: moment().tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
+    };
+    
+    const response = await fetch(n8nWebhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(testData),
+      timeout: 10000 // 10 segundos de timeout
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return res.status(500).json({
+        status: "Error",
+        message: "Error de conectividad con n8n",
+        details: {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+          webhookUrl: n8nWebhookUrl
+        }
+      });
+    }
+
+    const n8nResponse = await response.json();
+    
+    res.status(200).json({
+      status: "Success",
+      message: "Conexión con n8n exitosa",
+      data: {
+        webhookUrl: n8nWebhookUrl,
+        n8nResponse: n8nResponse,
+        testAt: moment().tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
+      }
+    });
+
+  } catch (error) {
+    console.error('Error probando conexión con n8n:', error);
+    
+    res.status(500).json({
+      status: "Error",
+      message: "No se pudo conectar con n8n",
+      error: error.message,
+      debug: {
+        webhookUrl: process.env.N8N_WEBHOOK_URL || 'No configurado',
+        originalError: error.message
+      }
+    });
+  }
 };
 
 const sendInvoiceByEmail = async (req, res) => {
@@ -4917,6 +5010,7 @@ module.exports = {
     deleteCategory,
     generateInvoicePDF,
     sendInvoiceByEmail,
-    sendInvoiceToN8N
+    sendInvoiceToN8N,
+    testN8NConnection
     
 };

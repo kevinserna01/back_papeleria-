@@ -2,7 +2,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 const router = express.Router();
 const mongoose = require('mongoose');
-const { registertrabajador, loginTrabajador,logoutTrabajador,newProduct,getProducts,updateProduct,deleteProduct,assignProductToInventory,getInventoryProducts,updateInventoryProduct,deleteInventoryProduct,getProductsWithStock,createSale,checkAndReserveSaleCode,releaseSaleCode,getLastRegisteredSaleCode,getAllSales,getReportsData,registeradmin,loginadmin,getSpecificDayReport,getDashboardData,getUsers,createUser,updateUser,loginUser,exportReportPDF,deleteUser,searchCustomersapi,createClient,getClients,getClientById,updateClient,deleteClient,searchClients,createInvoice,getInvoices,getInvoiceById,updateInvoiceStatus,getInvoicesByClient,createPayment,getPaymentsByInvoice,getPaymentsByClient,getAccountStatus,getPortfolioReport,getOverdueInvoices,getPaymentAnalysis,createCategory,getCategories,updateCategory,deleteCategory,generateInvoicePDF,sendInvoiceByEmail,sendInvoiceToN8N} =require('./controllers/papeleriaControllers');
+const { registertrabajador, loginTrabajador,logoutTrabajador,newProduct,getProducts,updateProduct,deleteProduct,assignProductToInventory,getInventoryProducts,updateInventoryProduct,deleteInventoryProduct,getProductsWithStock,createSale,checkAndReserveSaleCode,releaseSaleCode,getLastRegisteredSaleCode,getAllSales,getReportsData,registeradmin,loginadmin,getSpecificDayReport,getDashboardData,getUsers,createUser,updateUser,loginUser,exportReportPDF,deleteUser,searchCustomersapi,createClient,getClients,getClientById,updateClient,deleteClient,searchClients,createInvoice,getInvoices,getInvoiceById,updateInvoiceStatus,getInvoicesByClient,createPayment,getPaymentsByInvoice,getPaymentsByClient,getAccountStatus,getPortfolioReport,getOverdueInvoices,getPaymentAnalysis,createCategory,getCategories,updateCategory,deleteCategory,generateInvoicePDF,sendInvoiceByEmail,sendInvoiceToN8N,testN8NConnection} =require('./controllers/papeleriaControllers');
 
 dotenv.config({ path: './config.env' }); 
 
@@ -37,6 +37,7 @@ mongoose.connect(process.env.MONGO_URI)
    router.get('/invoice-pdf/:saleId', generateInvoicePDF);
    router.post('/send-invoice-email', sendInvoiceByEmail);
    router.post('/send-invoice-n8n', sendInvoiceToN8N);
+   router.get('/test-n8n-connection', testN8NConnection);
    router.post('/registeradminapi', registeradmin);
    router.post('/loginadminapi', loginadmin);
    router.get('/reportsapi/day', getSpecificDayReport);
