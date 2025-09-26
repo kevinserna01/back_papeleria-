@@ -2377,6 +2377,139 @@ const loginUser = async (req, res) => {
   }
 };
 
+// ---------------------------------GENERAR_FACTURA_PDF--------------------------------------------------------------
+const generateInvoicePDF = async (req, res) => {
+  try {
+    const { saleId } = req.params;
+    const db = await getDb();
+    
+    // Buscar la venta
+    const venta = await db.collection('ventas').findOne({ _id: new ObjectId(saleId) });
+    if (!venta) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Venta no encontrada"
+      });
+    }
+
+    // Crear el PDF
+    const doc = new PDFDocument({ 
+      size: 'A4',
+      margin: 50,
+      info: {
+        Title: `Factura VTA-${venta.code}`,
+        Author: 'Sistema Papelería',
+        Subject: 'Factura de Venta'
+      }
+    });
+
+    // Configurar headers para descarga
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=factura-${venta.code}.pdf`);
+    
+    // Pipe del PDF a la respuesta
+    doc.pipe(res);
+
+    // Diseño de la factura
+    doc.fontSize(20).text('FACTURA DE VENTA', 50, 50, { align: 'center' });
+    
+    // Información de la empresa
+    doc.fontSize(12)
+       .text('PAPELERÍA KEVIN', 50, 100)
+       .text('NIT: 123456789-0', 50, 120)
+       .text('Dirección: Medellín, Colombia', 50, 140)
+       .text('Teléfono: +57 300 123 4567', 50, 160);
+
+    // Información de la factura
+    doc.text(`No. Factura: VTA-${venta.code}`, 400, 100)
+       .text(`Fecha: ${moment(venta.fecha).format('DD/MM/YYYY')}`, 400, 120)
+       .text(`Hora: ${venta.hora}`, 400, 140);
+
+    // Información del cliente
+    doc.fontSize(14).text('DATOS DEL CLIENTE', 50, 200);
+    doc.fontSize(12)
+       .text(`Nombre: ${venta.cliente.name}`, 50, 220)
+       .text(`Documento: ${venta.cliente.document}`, 50, 240)
+       .text(`Email: ${venta.cliente.email}`, 50, 260)
+       .text(`Teléfono: ${venta.cliente.phone}`, 50, 280);
+
+    // Información del trabajador
+    doc.fontSize(14).text('VENDEDOR', 50, 320);
+    doc.fontSize(12)
+       .text(`Nombre: ${venta.trabajador.nombre}`, 50, 340)
+       .text(`Email: ${venta.trabajador.correo}`, 50, 360);
+
+    // Tabla de productos
+    let yPosition = 400;
+    doc.fontSize(14).text('DETALLE DE PRODUCTOS', 50, yPosition);
+    yPosition += 30;
+
+    // Headers de la tabla
+    doc.fontSize(10)
+       .text('Código', 50, yPosition)
+       .text('Producto', 120, yPosition)
+       .text('Cantidad', 300, yPosition)
+       .text('Precio Unit.', 380, yPosition)
+       .text('Total', 480, yPosition);
+    
+    yPosition += 20;
+    
+    // Línea separadora
+    doc.moveTo(50, yPosition).lineTo(550, yPosition).stroke();
+    yPosition += 10;
+
+    // Productos
+    venta.productos.forEach(producto => {
+      doc.fontSize(9)
+         .text(producto.code, 50, yPosition)
+         .text(producto.name, 120, yPosition)
+         .text(producto.cantidad.toString(), 300, yPosition)
+         .text(`$${producto.precioUnitario.toLocaleString()}`, 380, yPosition)
+         .text(`$${producto.total.toLocaleString()}`, 480, yPosition);
+      yPosition += 20;
+    });
+
+    // Totales
+    yPosition += 20;
+    doc.moveTo(50, yPosition).lineTo(550, yPosition).stroke();
+    yPosition += 20;
+
+    doc.fontSize(12)
+       .text('SUBTOTAL:', 400, yPosition)
+       .text(`$${venta.totalVentaSinDescuento.toLocaleString()}`, 480, yPosition);
+    
+    if (venta.descuentoAplicado > 0) {
+      yPosition += 20;
+      doc.text('DESCUENTO:', 400, yPosition)
+         .text(`-$${venta.montoDescuento.toLocaleString()}`, 480, yPosition);
+    }
+
+    yPosition += 20;
+    doc.fontSize(14).text('TOTAL:', 400, yPosition)
+       .text(`$${venta.totalVenta.toLocaleString()}`, 480, yPosition);
+
+    // Método de pago
+    yPosition += 40;
+    doc.fontSize(12).text(`Método de Pago: ${venta.metodoPago}`, 50, yPosition);
+
+    // Pie de página
+    yPosition += 60;
+    doc.fontSize(10)
+       .text('Gracias por su compra', 50, yPosition, { align: 'center' })
+       .text('Sistema de Papelería - Medellín', 50, yPosition + 20, { align: 'center' });
+
+    doc.end();
+
+  } catch (error) {
+    console.error('Error generando PDF de factura:', error);
+    res.status(500).json({
+      status: "Error",
+      message: "Error al generar el PDF de la factura",
+      error: error.message
+    });
+  }
+};
+
 const exportReportPDF = async (req, res) => {
   try {
     const { resumen, total, top, categorias, images } = req.body;
@@ -4330,6 +4463,7 @@ module.exports = {
     createCategory,
     getCategories,
     updateCategory,
-    deleteCategory
+    deleteCategory,
+    generateInvoicePDF
     
 };
