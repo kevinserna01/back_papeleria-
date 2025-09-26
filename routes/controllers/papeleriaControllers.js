@@ -1213,15 +1213,15 @@ const getReportsData = async (req, res) => {
             clientes: new Set()
           };
         }
-        departamentos[departamento].totalVentas += v.totalVenta;
-        departamentos[departamento].totalVentasSinDescuento += (v.totalVentaSinDescuento || v.totalVenta);
+        departamentos[departamento].totalVentas += (v.totalVenta || 0);
+        departamentos[departamento].totalVentasSinDescuento += (v.totalVentaSinDescuento || v.totalVenta || 0);
         departamentos[departamento].totalDescuentos += (v.montoDescuento || 0);
         departamentos[departamento].cantidadVentas += 1;
-        if (v.descuentoAplicado > 0) {
+        if ((v.descuentoAplicado || 0) > 0) {
           departamentos[departamento].ventasConDescuento += 1;
         }
-        if (v.cliente?.nombre) {
-          departamentos[departamento].clientes.add(v.cliente.nombre);
+        if (v.cliente?.name || v.cliente?.nombre) {
+          departamentos[departamento].clientes.add(v.cliente.name || v.cliente.nombre);
         }
       });
 
@@ -1251,8 +1251,8 @@ const getReportsData = async (req, res) => {
               productos: new Set()
             };
           }
-          categorias[categoria].cantidadVendida += p.cantidad;
-          categorias[categoria].totalGenerado += p.precioUnitario * p.cantidad;
+          categorias[categoria].cantidadVendida += (p.cantidad || 0);
+          categorias[categoria].totalGenerado += (p.precioUnitario || 0) * (p.cantidad || 0);
           categorias[categoria].productos.add(p.name);
         });
       });
@@ -1290,10 +1290,10 @@ const getReportsData = async (req, res) => {
               clientes: new Set()
             };
           }
-          ventasPorMes[mes].totalVentas += v.totalVenta;
+          ventasPorMes[mes].totalVentas += (v.totalVenta || 0);
           ventasPorMes[mes].cantidadVentas += 1;
-          if (v.cliente?.nombre) {
-            ventasPorMes[mes].clientes.add(v.cliente.nombre);
+          if (v.cliente?.name || v.cliente?.nombre) {
+            ventasPorMes[mes].clientes.add(v.cliente.name || v.cliente.nombre);
           }
         });
 
@@ -1327,15 +1327,15 @@ const getReportsData = async (req, res) => {
           };
         }
         
-        trabajadores[key].totalVentas += v.totalVenta;
-        trabajadores[key].totalVentasSinDescuento += (v.totalVentaSinDescuento || v.totalVenta);
+        trabajadores[key].totalVentas += (v.totalVenta || 0);
+        trabajadores[key].totalVentasSinDescuento += (v.totalVentaSinDescuento || v.totalVenta || 0);
         trabajadores[key].totalDescuentos += (v.montoDescuento || 0);
         trabajadores[key].cantidadVentas += 1;
-        if (v.descuentoAplicado > 0) {
+        if ((v.descuentoAplicado || 0) > 0) {
           trabajadores[key].ventasConDescuento += 1;
         }
-        if (v.cliente?.nombre) {
-          trabajadores[key].clientes.add(v.cliente.nombre);
+        if (v.cliente?.name || v.cliente?.nombre) {
+          trabajadores[key].clientes.add(v.cliente.name || v.cliente.nombre);
         }
       }
 
@@ -1366,8 +1366,8 @@ const getReportsData = async (req, res) => {
               totalGenerado: 0
             };
           }
-          productos[p.name].cantidadVendida += p.cantidad;
-          productos[p.name].totalGenerado += p.precioUnitario * p.cantidad;
+          productos[p.name].cantidadVendida += (p.cantidad || 0);
+          productos[p.name].totalGenerado += (p.precioUnitario || 0) * (p.cantidad || 0);
         });
       });
 
@@ -1397,8 +1397,8 @@ const getReportsData = async (req, res) => {
               totalGenerado: 0
             };
           }
-          productos[p.name].cantidadVendida += p.cantidad;
-          productos[p.name].totalGenerado += p.precioUnitario * p.cantidad;
+          productos[p.name].cantidadVendida += (p.cantidad || 0);
+          productos[p.name].totalGenerado += (p.precioUnitario || 0) * (p.cantidad || 0);
         });
       });
 
@@ -1428,8 +1428,8 @@ const getReportsData = async (req, res) => {
               totalGenerado: 0
             };
           }
-          productos[p.name].cantidadVendida += p.cantidad;
-          productos[p.name].totalGenerado += p.precioUnitario * p.cantidad;
+          productos[p.name].cantidadVendida += (p.cantidad || 0);
+          productos[p.name].totalGenerado += (p.precioUnitario || 0) * (p.cantidad || 0);
         });
       });
 
@@ -1459,8 +1459,8 @@ const getReportsData = async (req, res) => {
               totalGenerado: 0
             };
           }
-          productos[p.name].cantidadVendida += p.cantidad;
-          productos[p.name].totalGenerado += p.precioUnitario * p.cantidad;
+          productos[p.name].cantidadVendida += (p.cantidad || 0);
+          productos[p.name].totalGenerado += (p.precioUnitario || 0) * (p.cantidad || 0);
         });
       });
 
@@ -1477,14 +1477,14 @@ const getReportsData = async (req, res) => {
 
     // 9. RESUMEN GENERAL
     const buildResumenGeneral = () => {
-      const totalVentas = ventas.reduce((sum, v) => sum + v.totalVenta, 0);
-      const totalVentasSinDescuento = ventas.reduce((sum, v) => sum + (v.totalVentaSinDescuento || v.totalVenta), 0);
+      const totalVentas = ventas.reduce((sum, v) => sum + (v.totalVenta || 0), 0);
+      const totalVentasSinDescuento = ventas.reduce((sum, v) => sum + (v.totalVentaSinDescuento || v.totalVenta || 0), 0);
       const totalDescuentos = ventas.reduce((sum, v) => sum + (v.montoDescuento || 0), 0);
-      const ventasConDescuento = ventas.filter(v => v.descuentoAplicado > 0).length;
+      const ventasConDescuento = ventas.filter(v => (v.descuentoAplicado || 0) > 0).length;
       const cantidadVentas = ventas.length;
-      const clientesUnicos = new Set(ventas.map(v => v.cliente?.nombre).filter(Boolean)).size;
-      const productosVendidos = new Set(ventas.flatMap(v => v.productos.map(p => p.name))).size;
-      const categoriasVendidas = new Set(ventas.flatMap(v => v.productos.map(p => p.categoria || 'Sin categoría'))).size;
+      const clientesUnicos = new Set(ventas.map(v => v.cliente?.name || v.cliente?.nombre).filter(Boolean)).size;
+      const productosVendidos = new Set(ventas.flatMap(v => (v.productos || []).map(p => p.name)).filter(Boolean)).size;
+      const categoriasVendidas = new Set(ventas.flatMap(v => (v.productos || []).map(p => p.categoria || 'Sin categoría')).filter(Boolean)).size;
       const trabajadoresUnicos = new Set(ventas.map(v => v.trabajador?.correo).filter(Boolean)).size;
 
       return [{
