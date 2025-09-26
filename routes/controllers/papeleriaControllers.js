@@ -820,7 +820,8 @@ const createSale = async (req, res) => {
       productos,
       metodoPago,
       cliente, // { name, document, email, phone }
-      trabajador // { correo, nombre }
+      trabajador, // { correo, nombre }
+      totalVenta: totalVentaPayload // Total de venta del payload
     } = req.body;
     
     if (!code || typeof code !== 'string') {
@@ -884,7 +885,7 @@ const createSale = async (req, res) => {
     const detalleVenta = [];
     
     for (const item of productos) {
-      const { code: productCode, cantidad } = item;
+      const { code: productCode, cantidad, precioUnitario, total } = item;
     
       if (!productCode || cantidad <= 0) {
         return res.status(400).json({
@@ -910,7 +911,9 @@ const createSale = async (req, res) => {
         });
       }
     
-      const subtotal = prodInfo.price * cantidad;
+      // Usar precios del payload si están disponibles, sino calcular desde la BD
+      const precioFinal = precioUnitario || prodInfo.price;
+      const subtotal = total || (precioFinal * cantidad);
       totalVenta += subtotal;
     
       detalleVenta.push({
@@ -918,7 +921,7 @@ const createSale = async (req, res) => {
         name: prodInfo.name,
         categoria: prodInfo.category,
         cantidad,
-        precioUnitario: prodInfo.price,
+        precioUnitario: precioFinal,
         total: subtotal
       });
     
@@ -927,6 +930,9 @@ const createSale = async (req, res) => {
         { $inc: { stock: -cantidad }, $set: { lastUpdate: new Date() } }
       );
     }
+    
+    // Usar totalVenta del payload si está disponible, sino usar el calculado
+    const totalVentaFinal = totalVentaPayload || totalVenta;
     
     // Guardar cliente si es válido y no existe
     let clienteGuardado = null;
@@ -960,7 +966,7 @@ const createSale = async (req, res) => {
       cliente: clienteGuardado,
       trabajador: trabajadorInfo, // NUEVO: Información del trabajador
       productos: detalleVenta,
-      totalVenta,
+      totalVenta: totalVentaFinal,
       metodoPago,
       createdAt: new Date()
     };
