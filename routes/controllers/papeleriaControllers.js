@@ -2591,7 +2591,7 @@ const sendInvoiceToN8N = async (req, res) => {
     };
 
     // Enviar a n8n webhook
-    const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || 'http://localhost:5678/webhook-test/v1/papeleria/send-invoice-n8n';
+    const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || 'https://unaccosted-dayton-nonascetically.ngrok-free.dev/webhook-test/v1/papeleria/send-invoice-n8n';
     
     console.log('Enviando datos a n8n webhook:', n8nWebhookUrl);
     console.log('Datos a enviar:', JSON.stringify(n8nData, null, 2));
