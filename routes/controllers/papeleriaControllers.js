@@ -2591,7 +2591,7 @@ const sendInvoiceToN8N = async (req, res) => {
     };
 
     // Enviar a n8n webhook
-    const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || 'https://unaccosted-dayton-nonascetically.ngrok-free.dev/webhook-test/v1/papeleria/send-invoice-n8n';
+    const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || 'https://unaccosted-dayton-nonascetically.ngrok-free.dev/webhook/v1/papeleria/send-invoice-n8n';
     
     console.log('Enviando datos a n8n webhook:', n8nWebhookUrl);
     console.log('Datos a enviar:', JSON.stringify(n8nData, null, 2));
@@ -2774,7 +2774,7 @@ const generateInvoicePDFBase64 = async (venta) => {
 // Endpoint de prueba para verificar conectividad con n8n
 const testN8NConnection = async (req, res) => {
   try {
-    const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || 'http://localhost:5678/webhook-test/v1/papeleria/send-invoice-email';
+    const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || 'https://unaccosted-dayton-nonascetically.ngrok-free.dev/v1/papeleria/send-invoice-email';
     
     console.log('Probando conexión con n8n:', n8nWebhookUrl);
     
