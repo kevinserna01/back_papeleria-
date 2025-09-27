@@ -2611,7 +2611,27 @@ const sendInvoiceToN8N = async (req, res) => {
       throw new Error(`Error enviando a n8n: ${response.status} - ${errorText}`);
     }
 
-    const n8nResponse = await response.json();
+    // Manejar respuesta que puede no ser JSON
+    let n8nResponse;
+    try {
+      const responseText = await response.text();
+      console.log('Respuesta cruda de n8n:', responseText);
+      
+      if (responseText.trim()) {
+        // Intentar parsear como JSON
+        n8nResponse = JSON.parse(responseText);
+      } else {
+        n8nResponse = { message: "Respuesta vacía de n8n", success: true };
+      }
+    } catch (parseError) {
+      console.warn('n8n devolvió respuesta no-JSON, pero procesó correctamente:', parseError.message);
+      // Si no es JSON válido, asumir que fue exitoso ya que response.ok es true
+      n8nResponse = { 
+        message: "n8n procesó la solicitud correctamente",
+        success: true,
+        rawResponse: responseText || "Sin contenido"
+      };
+    }
 
     res.status(200).json({
       status: "Success",
@@ -2807,7 +2827,25 @@ const testN8NConnection = async (req, res) => {
       });
     }
 
-    const n8nResponse = await response.json();
+    // Manejar respuesta que puede no ser JSON
+    let n8nResponse;
+    try {
+      const responseText = await response.text();
+      console.log('Respuesta de test n8n:', responseText);
+      
+      if (responseText.trim()) {
+        n8nResponse = JSON.parse(responseText);
+      } else {
+        n8nResponse = { message: "Test exitoso - respuesta vacía", success: true };
+      }
+    } catch (parseError) {
+      console.warn('Test n8n - respuesta no-JSON:', parseError.message);
+      n8nResponse = { 
+        message: "Test exitoso - n8n está funcionando",
+        success: true,
+        rawResponse: responseText || "Sin contenido"
+      };
+    }
     
     res.status(200).json({
       status: "Success",
