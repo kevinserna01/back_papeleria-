@@ -2613,8 +2613,10 @@ const sendInvoiceToN8N = async (req, res) => {
 
     // Manejar respuesta que puede no ser JSON
     let n8nResponse;
+    let responseText;
+    
     try {
-      const responseText = await response.text();
+      responseText = await response.text();
       console.log('Respuesta cruda de n8n:', responseText);
       
       if (responseText.trim()) {
@@ -2829,8 +2831,10 @@ const testN8NConnection = async (req, res) => {
 
     // Manejar respuesta que puede no ser JSON
     let n8nResponse;
+    let responseText;
+    
     try {
-      const responseText = await response.text();
+      responseText = await response.text();
       console.log('Respuesta de test n8n:', responseText);
       
       if (responseText.trim()) {
