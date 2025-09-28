@@ -2500,6 +2500,13 @@ const loginUser = async (req, res) => {
   }
 };
 
+// Función helper para validar ObjectId
+const isValidObjectId = (id) => {
+  if (!id) return false;
+  if (typeof id !== 'string') return false;
+  return /^[0-9a-fA-F]{24}$/.test(id);
+};
+
 // ---------------------------------GENERAR_FACTURA_PDF--------------------------------------------------------------
 const generateInvoicePDF = async (req, res) => {
   try {
@@ -2511,6 +2518,14 @@ const generateInvoicePDF = async (req, res) => {
 
     // Buscar por ID de factura o ID de venta
     if (facturaId) {
+      // Validar formato de ObjectId
+      if (!isValidObjectId(facturaId)) {
+        return res.status(400).json({
+          status: "Error",
+          message: "ID de factura inválido"
+        });
+      }
+
       factura = await db.collection('facturas').findOne({ _id: new ObjectId(facturaId) });
       if (!factura) {
         return res.status(404).json({
@@ -2524,6 +2539,14 @@ const generateInvoicePDF = async (req, res) => {
         venta = await db.collection('ventas').findOne({ _id: factura.ventaId });
       }
     } else if (saleId) {
+      // Validar formato de ObjectId
+      if (!isValidObjectId(saleId)) {
+        return res.status(400).json({
+          status: "Error",
+          message: "ID de venta inválido"
+        });
+      }
+
       // Buscar la venta
       venta = await db.collection('ventas').findOne({ _id: new ObjectId(saleId) });
       if (!venta) {
@@ -2753,6 +2776,14 @@ const sendInvoiceToN8N = async (req, res) => {
       return res.status(400).json({
         status: "Error",
         message: "saleId y email son obligatorios"
+      });
+    }
+
+    // Validar formato de ObjectId
+    if (!isValidObjectId(saleId)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de venta inválido"
       });
     }
 
@@ -3214,6 +3245,14 @@ const sendInvoiceByEmail = async (req, res) => {
       return res.status(400).json({
         status: "Error",
         message: "saleId y email son obligatorios"
+      });
+    }
+
+    // Validar formato de ObjectId
+    if (!isValidObjectId(saleId)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de venta inválido"
       });
     }
 
@@ -4411,6 +4450,14 @@ const getInvoiceById = async (req, res) => {
       });
     }
 
+    // Validar formato de ObjectId
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de factura inválido"
+      });
+    }
+
     const factura = await db.collection('facturas').findOne({ _id: new ObjectId(id) });
 
     if (!factura) {
@@ -4575,6 +4622,14 @@ const createPayment = async (req, res) => {
       });
     }
 
+    // Validar formato de ObjectId
+    if (!isValidObjectId(facturaId)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de factura inválido"
+      });
+    }
+
     if (montoAbono <= 0) {
       return res.status(400).json({
         status: "Error",
@@ -4686,6 +4741,14 @@ const getPaymentsByInvoice = async (req, res) => {
       return res.status(400).json({
         status: "Error",
         message: "ID de la factura es requerido."
+      });
+    }
+
+    // Validar formato de ObjectId
+    if (!isValidObjectId(facturaId)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de factura inválido"
       });
     }
 
@@ -5426,6 +5489,14 @@ const confirmPayment = async (req, res) => {
       });
     }
 
+    // Validar formato de ObjectId
+    if (!isValidObjectId(facturaId)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de factura inválido"
+      });
+    }
+
     if (montoPagado <= 0) {
       return res.status(400).json({
         status: "Error",
@@ -5739,6 +5810,14 @@ const getInvoiceWithPaymentPlan = async (req, res) => {
       return res.status(400).json({
         status: "Error",
         message: "ID de la factura es requerido."
+      });
+    }
+
+    // Validar formato de ObjectId
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de factura inválido"
       });
     }
 
