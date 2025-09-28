@@ -857,7 +857,7 @@ const createSale = async (req, res) => {
       });
     }
 
-    // Si es financiado, validar plan de abonos
+    // Si es financiado, validar plan de abonos (más flexible)
     if (tipoVenta === 'financiado') {
       if (!planAbonos || !Array.isArray(planAbonos) || planAbonos.length === 0) {
         return res.status(400).json({
@@ -866,14 +866,46 @@ const createSale = async (req, res) => {
         });
       }
 
-      // Validar que la suma de abonos coincida con el total
-      const totalAbonos = planAbonos.reduce((sum, abono) => sum + abono.monto, 0);
-      if (Math.abs(totalAbonos - (totalVentaPayload || 0)) > 1) {
-        return res.status(400).json({
-          status: "Error",
-          message: "La suma de los abonos debe coincidir con el total de la venta."
-        });
+      // Procesar abonos flexibles
+      const abonosProcesados = planAbonos.map((abono, index) => {
+        const abonoProcesado = { ...abono };
+        
+        // Si no tiene monto o es 0, calcular automáticamente
+        if (!abonoProcesado.monto || abonoProcesado.monto === 0) {
+          abonoProcesado.monto = 0; // Se calculará después
+          abonoProcesado.esFlexible = true;
+        } else {
+          abonoProcesado.esFlexible = false;
+        }
+        
+        // Si no tiene fecha, asignar fecha automática (cada mes)
+        if (!abonoProcesado.fechaProgramada) {
+          const fechaBase = new Date();
+          fechaBase.setMonth(fechaBase.getMonth() + index + 1);
+          abonoProcesado.fechaProgramada = fechaBase;
+        }
+        
+        return abonoProcesado;
+      });
+
+      // Calcular montos para abonos flexibles
+      const abonosConMonto = abonosProcesados.filter(abono => !abono.esFlexible);
+      const abonosFlexibles = abonosProcesados.filter(abono => abono.esFlexible);
+      
+      if (abonosFlexibles.length > 0) {
+        const sumaAbonosDefinidos = abonosConMonto.reduce((sum, abono) => sum + abono.monto, 0);
+        const montoRestante = (totalVentaPayload || 0) - sumaAbonosDefinidos;
+        
+        if (montoRestante > 0) {
+          const montoPorAbono = montoRestante / abonosFlexibles.length;
+          abonosFlexibles.forEach(abono => {
+            abono.monto = Math.round(montoPorAbono * 100) / 100;
+          });
+        }
       }
+
+      // Actualizar el array de abonos procesados
+      planAbonos.splice(0, planAbonos.length, ...abonosProcesados);
     }
 
     // Validar que el cliente esté completo para poder crear la factura
@@ -5810,6 +5842,114 @@ const getPaymentsDashboard = async (req, res) => {
   }
 };
 
+// Función para editar abonos desde el panel admin
+const editPaymentPlan = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { facturaId, abonos } = req.body;
+
+    // Validaciones
+    if (!facturaId || !abonos || !Array.isArray(abonos)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "facturaId y abonos son obligatorios."
+      });
+    }
+
+    // Validar formato de ObjectId
+    if (!isValidObjectId(facturaId)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de factura inválido"
+      });
+    }
+
+    // Buscar la factura
+    const factura = await db.collection('facturas').findOne({ _id: new ObjectId(facturaId) });
+    if (!factura) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Factura no encontrada."
+      });
+    }
+
+    // Verificar que la factura no esté completamente pagada
+    if (factura.estado === 'pagada') {
+      return res.status(400).json({
+        status: "Error",
+        message: "No se pueden editar abonos de facturas completamente pagadas."
+      });
+    }
+
+    // Procesar los abonos editados
+    const abonosProcesados = abonos.map((abono, index) => {
+      const abonoProcesado = {
+        numero: abono.numero || index + 1,
+        monto: Number(abono.monto) || 0,
+        fechaProgramada: abono.fechaProgramada ? new Date(abono.fechaProgramada) : new Date(),
+        estado: abono.estado || 'pendiente',
+        observaciones: abono.observaciones || '',
+        esFlexible: abono.esFlexible || false,
+        // Mantener datos de pago si ya estaba pagado
+        fechaPago: abono.fechaPago ? new Date(abono.fechaPago) : null,
+        montoPagado: abono.montoPagado || 0
+      };
+
+      // Si el abono ya estaba pagado, mantener el estado
+      if (abono.estado === 'pagado' && abono.fechaPago) {
+        abonoProcesado.estado = 'pagado';
+        abonoProcesado.montoPagado = abono.montoPagado || abono.monto;
+      }
+
+      return abonoProcesado;
+    });
+
+    // Calcular el total de los abonos
+    const totalAbonos = abonosProcesados.reduce((sum, abono) => sum + abono.monto, 0);
+    const diferencia = Math.abs(totalAbonos - factura.total);
+
+    // Si hay diferencia significativa, ajustar el último abono
+    if (diferencia > 0.01) {
+      const ultimoAbono = abonosProcesados[abonosProcesados.length - 1];
+      if (ultimoAbono && ultimoAbono.estado === 'pendiente') {
+        ultimoAbono.monto += (factura.total - totalAbonos);
+        ultimoAbono.monto = Math.round(ultimoAbono.monto * 100) / 100;
+      }
+    }
+
+    // Actualizar la factura
+    await db.collection('facturas').updateOne(
+      { _id: new ObjectId(facturaId) },
+      {
+        $set: {
+          planAbonos: abonosProcesados,
+          lastUpdate: new Date()
+        }
+      }
+    );
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Plan de abonos actualizado correctamente.",
+      data: {
+        facturaId: facturaId,
+        abonos: abonosProcesados,
+        totalAbonos: abonosProcesados.reduce((sum, abono) => sum + abono.monto, 0),
+        totalFactura: factura.total,
+        diferencia: factura.total - abonosProcesados.reduce((sum, abono) => sum + abono.monto, 0)
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al editar plan de abonos:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al editar el plan de abonos.",
+      error: error.message
+    });
+  }
+};
+
 // Función para obtener factura con plan de abonos y venta relacionada
 const getInvoiceWithPaymentPlan = async (req, res) => {
   try {
@@ -5944,6 +6084,7 @@ module.exports = {
     // NUEVAS FUNCIONES PARA GESTIÓN DE ABONOS
     confirmPayment,
     getPaymentsDashboard,
-    getInvoiceWithPaymentPlan
+    getInvoiceWithPaymentPlan,
+    editPaymentPlan
     
 };
