@@ -34,7 +34,9 @@ mongoose.connect(process.env.MONGO_URI)
    router.get('/getLastSaleCodeapi', getLastRegisteredSaleCode);
    router.get('/salesapi', getAllSales);
    router.get('/reportsapi', getReportsData);
-   router.get('/invoice-pdf/:saleId', generateInvoicePDF);
+   // Rutas para generar PDF de factura
+   router.get('/invoice-pdf/:saleId', generateInvoicePDF); // Por ID de venta (compatibilidad)
+   router.get('/factura-pdf/:facturaId', generateInvoicePDF); // Por ID de factura
    router.post('/send-invoice-email', sendInvoiceByEmail);
    router.post('/send-invoice-n8n', sendInvoiceToN8N);
    router.get('/test-n8n-connection', testN8NConnection);

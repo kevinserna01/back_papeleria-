@@ -2503,15 +2503,75 @@ const loginUser = async (req, res) => {
 // ---------------------------------GENERAR_FACTURA_PDF--------------------------------------------------------------
 const generateInvoicePDF = async (req, res) => {
   try {
-    const { saleId } = req.params;
+    const { saleId, facturaId } = req.params;
     const db = await getDb();
     
-    // Buscar la venta
-    const venta = await db.collection('ventas').findOne({ _id: new ObjectId(saleId) });
-    if (!venta) {
+    let factura = null;
+    let venta = null;
+
+    // Buscar por ID de factura o ID de venta
+    if (facturaId) {
+      factura = await db.collection('facturas').findOne({ _id: new ObjectId(facturaId) });
+      if (!factura) {
+        return res.status(404).json({
+          status: "Error",
+          message: "Factura no encontrada"
+        });
+      }
+      
+      // Obtener la venta relacionada si existe
+      if (factura.ventaId) {
+        venta = await db.collection('ventas').findOne({ _id: factura.ventaId });
+      }
+    } else if (saleId) {
+      // Buscar la venta
+      venta = await db.collection('ventas').findOne({ _id: new ObjectId(saleId) });
+      if (!venta) {
+        return res.status(404).json({
+          status: "Error",
+          message: "Venta no encontrada"
+        });
+      }
+
+      // Buscar la factura relacionada
+      if (venta.facturaId) {
+        factura = await db.collection('facturas').findOne({ _id: venta.facturaId });
+      }
+    } else {
+      return res.status(400).json({
+        status: "Error",
+        message: "Debe proporcionar saleId o facturaId"
+      });
+    }
+
+    // Si no hay factura, crear una temporal con datos de la venta
+    if (!factura && venta) {
+      factura = {
+        numeroFactura: `VTA-${venta.code}`,
+        cliente: {
+          nombre: venta.cliente.name,
+          tipoIdentificacion: venta.cliente.tipoIdentificacion || 'CC',
+          numeroIdentificacion: venta.cliente.document,
+          email: venta.cliente.email,
+          telefono: venta.cliente.phone
+        },
+        productos: venta.productos,
+        total: venta.totalVenta,
+        subtotal: venta.totalVentaSinDescuento,
+        descuentoAplicado: venta.descuentoAplicado || 0,
+        descuentoTotal: venta.montoDescuento || 0,
+        metodoPago: venta.metodoPago,
+        fechaEmision: venta.fecha,
+        estado: venta.estadoPago === 'pagado' ? 'pagada' : 'pendiente',
+        saldoPendiente: venta.estadoPago === 'pagado' ? 0 : venta.totalVenta,
+        tipoVenta: venta.tipoVenta || 'contado'
+      };
+    }
+
+    if (!factura) {
       return res.status(404).json({
         status: "Error",
-        message: "Venta no encontrada"
+        message: "No se encontró información de factura"
       });
     }
 
@@ -2520,7 +2580,7 @@ const generateInvoicePDF = async (req, res) => {
       size: 'A4',
       margin: 50,
       info: {
-        Title: `Factura VTA-${venta.code}`,
+        Title: `Factura ${factura.numeroFactura}`,
         Author: 'Sistema Papelería',
         Subject: 'Factura de Venta'
       }
@@ -2528,7 +2588,7 @@ const generateInvoicePDF = async (req, res) => {
 
     // Configurar headers para descarga
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=factura-${venta.code}.pdf`);
+    res.setHeader('Content-Disposition', `attachment; filename=factura-${factura.numeroFactura}.pdf`);
     
     // Pipe del PDF a la respuesta
     doc.pipe(res);
@@ -2544,26 +2604,36 @@ const generateInvoicePDF = async (req, res) => {
        .text('Teléfono: +57 300 123 4567', 50, 160);
 
     // Información de la factura
-    doc.text(`No. Factura: VTA-${venta.code}`, 400, 100)
-       .text(`Fecha: ${moment(venta.fecha).format('DD/MM/YYYY')}`, 400, 120)
-       .text(`Hora: ${venta.hora}`, 400, 140);
+    doc.text(`No. Factura: ${factura.numeroFactura}`, 400, 100)
+       .text(`Fecha: ${moment(factura.fechaEmision).format('DD/MM/YYYY')}`, 400, 120)
+       .text(`Estado: ${factura.estado.toUpperCase()}`, 400, 140);
+
+    // Si es financiado, mostrar información adicional
+    if (factura.tipoVenta === 'financiado' || (factura.planAbonos && factura.planAbonos.length > 0)) {
+      doc.text(`Tipo: FINANCIADO`, 400, 160);
+      if (factura.fechaVencimiento) {
+        doc.text(`Vencimiento: ${moment(factura.fechaVencimiento).format('DD/MM/YYYY')}`, 400, 180);
+      }
+    }
 
     // Información del cliente
-    doc.fontSize(14).text('DATOS DEL CLIENTE', 50, 200);
+    doc.fontSize(14).text('DATOS DEL CLIENTE', 50, 220);
     doc.fontSize(12)
-       .text(`Nombre: ${venta.cliente.name}`, 50, 220)
-       .text(`Documento: ${venta.cliente.document}`, 50, 240)
-       .text(`Email: ${venta.cliente.email}`, 50, 260)
-       .text(`Teléfono: ${venta.cliente.phone}`, 50, 280);
+       .text(`Nombre: ${factura.cliente.nombre}`, 50, 240)
+       .text(`${factura.cliente.tipoIdentificacion || 'Documento'}: ${factura.cliente.numeroIdentificacion}`, 50, 260)
+       .text(`Email: ${factura.cliente.email}`, 50, 280)
+       .text(`Teléfono: ${factura.cliente.telefono}`, 50, 300);
 
-    // Información del trabajador
-    doc.fontSize(14).text('VENDEDOR', 50, 320);
-    doc.fontSize(12)
-       .text(`Nombre: ${venta.trabajador.nombre}`, 50, 340)
-       .text(`Email: ${venta.trabajador.correo}`, 50, 360);
+    // Información del trabajador (si existe en la venta)
+    if (venta && venta.trabajador) {
+      doc.fontSize(14).text('VENDEDOR', 50, 340);
+      doc.fontSize(12)
+         .text(`Nombre: ${venta.trabajador.nombre}`, 50, 360)
+         .text(`Email: ${venta.trabajador.correo}`, 50, 380);
+    }
 
     // Tabla de productos
-    let yPosition = 400;
+    let yPosition = venta && venta.trabajador ? 420 : 340;
     doc.fontSize(14).text('DETALLE DE PRODUCTOS', 50, yPosition);
     yPosition += 30;
 
@@ -2582,13 +2652,13 @@ const generateInvoicePDF = async (req, res) => {
     yPosition += 10;
 
     // Productos
-    venta.productos.forEach(producto => {
+    factura.productos.forEach(producto => {
       doc.fontSize(9)
          .text(producto.code, 50, yPosition)
-         .text(producto.name, 120, yPosition)
+         .text(producto.name || producto.nombre, 120, yPosition)
          .text(producto.cantidad.toString(), 300, yPosition)
          .text(`$${producto.precioUnitario.toLocaleString()}`, 380, yPosition)
-         .text(`$${producto.total.toLocaleString()}`, 480, yPosition);
+         .text(`$${(producto.total || producto.subtotal).toLocaleString()}`, 480, yPosition);
       yPosition += 20;
     });
 
@@ -2599,24 +2669,63 @@ const generateInvoicePDF = async (req, res) => {
 
     doc.fontSize(12)
        .text('SUBTOTAL:', 400, yPosition)
-       .text(`$${venta.totalVentaSinDescuento.toLocaleString()}`, 480, yPosition);
+       .text(`$${(factura.subtotal || factura.total).toLocaleString()}`, 480, yPosition);
     
-    if (venta.descuentoAplicado > 0) {
+    if (factura.descuentoAplicado > 0) {
       yPosition += 20;
-      doc.text('DESCUENTO:', 400, yPosition)
-         .text(`-$${venta.montoDescuento.toLocaleString()}`, 480, yPosition);
+      doc.text(`DESCUENTO (${factura.descuentoAplicado}%):`, 400, yPosition)
+         .text(`-$${factura.descuentoTotal.toLocaleString()}`, 480, yPosition);
+    }
+
+    if (factura.iva && factura.iva > 0) {
+      yPosition += 20;
+      doc.text(`IVA (${factura.iva}%):`, 400, yPosition)
+         .text(`$${factura.ivaTotal.toLocaleString()}`, 480, yPosition);
     }
 
     yPosition += 20;
     doc.fontSize(14).text('TOTAL:', 400, yPosition)
-       .text(`$${venta.totalVenta.toLocaleString()}`, 480, yPosition);
+       .text(`$${factura.total.toLocaleString()}`, 480, yPosition);
+
+    // Información de pagos si es financiado
+    if (factura.tipoVenta === 'financiado' || (factura.planAbonos && factura.planAbonos.length > 0)) {
+      yPosition += 30;
+      doc.fontSize(12).text(`Saldo Pendiente: $${factura.saldoPendiente.toLocaleString()}`, 400, yPosition);
+      
+      // Mostrar plan de abonos si existe
+      if (factura.planAbonos && factura.planAbonos.length > 0) {
+        yPosition += 30;
+        doc.fontSize(14).text('PLAN DE ABONOS', 50, yPosition);
+        yPosition += 20;
+        
+        factura.planAbonos.forEach((abono, index) => {
+          const estadoText = abono.estado === 'pagado' ? '✓' : '○';
+          const fechaText = moment(abono.fechaProgramada).format('DD/MM/YYYY');
+          doc.fontSize(10)
+             .text(`${estadoText} Abono ${abono.numero}: $${abono.monto.toLocaleString()} - ${fechaText}`, 50, yPosition);
+          
+          if (abono.estado === 'pagado' && abono.fechaPago) {
+            doc.text(`   Pagado: ${moment(abono.fechaPago).format('DD/MM/YYYY')} - $${abono.montoPagado.toLocaleString()}`, 50, yPosition + 12);
+            yPosition += 24;
+          } else {
+            yPosition += 16;
+          }
+        });
+      }
+    }
 
     // Método de pago
-    yPosition += 40;
-    doc.fontSize(12).text(`Método de Pago: ${venta.metodoPago}`, 50, yPosition);
+    yPosition += 20;
+    doc.fontSize(12).text(`Método de Pago: ${factura.metodoPago}`, 50, yPosition);
+
+    // Observaciones si existen
+    if (factura.observaciones) {
+      yPosition += 20;
+      doc.text(`Observaciones: ${factura.observaciones}`, 50, yPosition);
+    }
 
     // Pie de página
-    yPosition += 60;
+    yPosition += 40;
     doc.fontSize(10)
        .text('Gracias por su compra', 50, yPosition, { align: 'center' })
        .text('Sistema de Papelería - Medellín', 50, yPosition + 20, { align: 'center' });
@@ -2665,50 +2774,98 @@ const sendInvoiceToN8N = async (req, res) => {
       });
     }
 
+    // Buscar la factura relacionada
+    let factura = null;
+    if (venta.facturaId) {
+      factura = await db.collection('facturas').findOne({ _id: venta.facturaId });
+    }
+
+    // Si no hay factura, crear una temporal con datos de la venta
+    if (!factura) {
+      factura = {
+        numeroFactura: `VTA-${venta.code}`,
+        cliente: {
+          nombre: venta.cliente.name,
+          tipoIdentificacion: venta.cliente.tipoIdentificacion || 'CC',
+          numeroIdentificacion: venta.cliente.document,
+          email: venta.cliente.email,
+          telefono: venta.cliente.phone
+        },
+        productos: venta.productos,
+        total: venta.totalVenta,
+        subtotal: venta.totalVentaSinDescuento,
+        descuentoAplicado: venta.descuentoAplicado || 0,
+        descuentoTotal: venta.montoDescuento || 0,
+        metodoPago: venta.metodoPago,
+        fechaEmision: venta.fecha,
+        estado: venta.estadoPago === 'pagado' ? 'pagada' : 'pendiente',
+        saldoPendiente: venta.estadoPago === 'pagado' ? 0 : venta.totalVenta,
+        tipoVenta: venta.tipoVenta || 'contado'
+      };
+    }
+
     // Generar PDF en Base64 para n8n
-    const pdfBase64 = await generateInvoicePDFBase64(venta);
+    const pdfBase64 = await generateInvoicePDFBase64(factura, venta);
 
     // Preparar datos para n8n
     const n8nData = {
       // Datos del cliente
-      nombre: venta.cliente.name,
+      nombre: factura.cliente.nombre,
       email: email,
-      documento: venta.cliente.document,
-      telefono: venta.cliente.phone,
+      documento: factura.cliente.numeroIdentificacion,
+      telefono: factura.cliente.telefono,
       
       // Datos de la factura
-      codigoFactura: `VTA-${venta.code}`,
-      fecha: moment(venta.fecha).format('DD/MM/YYYY'),
-      hora: venta.hora,
-      total: venta.totalVenta,
-      metodoPago: venta.metodoPago,
+      numeroFactura: factura.numeroFactura,
+      codigoFactura: factura.numeroFactura, // Mantener compatibilidad
+      fecha: moment(factura.fechaEmision).format('DD/MM/YYYY'),
+      hora: venta ? venta.hora : moment(factura.fechaEmision).format('HH:mm:ss'),
+      total: factura.total,
+      subtotal: factura.subtotal || factura.total,
+      descuento: factura.descuentoTotal || 0,
+      descuentoPorcentaje: factura.descuentoAplicado || 0,
+      saldoPendiente: factura.saldoPendiente || 0,
+      estado: factura.estado,
+      tipoVenta: factura.tipoVenta || 'contado',
+      metodoPago: factura.metodoPago,
       
-      // Datos del vendedor
-      vendedor: venta.trabajador.nombre,
-      emailVendedor: venta.trabajador.correo,
+      // Datos del vendedor (si existe)
+      vendedor: venta && venta.trabajador ? venta.trabajador.nombre : 'Sistema',
+      emailVendedor: venta && venta.trabajador ? venta.trabajador.correo : '',
       
       // Productos
-      productos: venta.productos.map(p => ({
+      productos: factura.productos.map(p => ({
         codigo: p.code,
-        nombre: p.name,
+        nombre: p.name || p.nombre,
         cantidad: p.cantidad,
         precioUnitario: p.precioUnitario,
-        total: p.total
+        total: p.total || p.subtotal
       })),
+      
+      // Plan de abonos si existe
+      planAbonos: factura.planAbonos ? factura.planAbonos.map(a => ({
+        numero: a.numero,
+        monto: a.monto,
+        fechaProgramada: moment(a.fechaProgramada).format('DD/MM/YYYY'),
+        estado: a.estado,
+        fechaPago: a.fechaPago ? moment(a.fechaPago).format('DD/MM/YYYY') : null,
+        montoPagado: a.montoPagado || 0
+      })) : [],
       
       // PDF en Base64
       pdfBase64: pdfBase64,
-      nombreArchivo: `factura-VTA-${venta.code}.pdf`,
+      nombreArchivo: `factura-${factura.numeroFactura}.pdf`,
       
       // URL del PDF para acceso directo
       pdfUrl: `${process.env.BASE_URL || 'https://back-papeleria-two.vercel.app'}/v1/papeleria/invoice-pdf/${saleId}`,
       
       // Asunto y mensaje personalizados
-      asunto: subject || `Factura VTA-${venta.code} - Papelería Kevin`,
-      mensaje: message || `Estimado/a ${venta.cliente.name}, adjunto encontrará la factura de su compra.`,
+      asunto: subject || `Factura ${factura.numeroFactura} - Papelería Kevin`,
+      mensaje: message || `Estimado/a ${factura.cliente.nombre}, adjunto encontrará la factura de su ${factura.tipoVenta === 'financiado' ? 'compra financiada' : 'compra'}.`,
       
       // Metadatos
       saleId: saleId,
+      facturaId: factura._id || null,
       timestamp: moment().tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
     };
 
@@ -2800,14 +2957,14 @@ const sendInvoiceToN8N = async (req, res) => {
   }
 };
 
-// Función auxiliar para generar PDF en Base64
-const generateInvoicePDFBase64 = async (venta) => {
+// Función auxiliar para generar PDF en Base64 - Actualizada para usar factura
+const generateInvoicePDFBase64 = async (factura, venta = null) => {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ 
       size: 'A4',
       margin: 50,
       info: {
-        Title: `Factura VTA-${venta.code}`,
+        Title: `Factura ${factura.numeroFactura}`,
         Author: 'Sistema Papelería',
         Subject: 'Factura de Venta'
       }
@@ -2823,7 +2980,7 @@ const generateInvoicePDFBase64 = async (venta) => {
     });
     doc.on('error', reject);
 
-    // Diseño de la factura (mismo que en generateInvoicePDF)
+    // Diseño de la factura
     doc.fontSize(20).text('FACTURA DE VENTA', 50, 50, { align: 'center' });
     
     // Información de la empresa
@@ -2834,26 +2991,36 @@ const generateInvoicePDFBase64 = async (venta) => {
        .text('Teléfono: +57 300 123 4567', 50, 160);
 
     // Información de la factura
-    doc.text(`No. Factura: VTA-${venta.code}`, 400, 100)
-       .text(`Fecha: ${moment(venta.fecha).format('DD/MM/YYYY')}`, 400, 120)
-       .text(`Hora: ${venta.hora}`, 400, 140);
+    doc.text(`No. Factura: ${factura.numeroFactura}`, 400, 100)
+       .text(`Fecha: ${moment(factura.fechaEmision).format('DD/MM/YYYY')}`, 400, 120)
+       .text(`Estado: ${factura.estado.toUpperCase()}`, 400, 140);
+
+    // Si es financiado, mostrar información adicional
+    if (factura.tipoVenta === 'financiado' || (factura.planAbonos && factura.planAbonos.length > 0)) {
+      doc.text(`Tipo: FINANCIADO`, 400, 160);
+      if (factura.fechaVencimiento) {
+        doc.text(`Vencimiento: ${moment(factura.fechaVencimiento).format('DD/MM/YYYY')}`, 400, 180);
+      }
+    }
 
     // Información del cliente
-    doc.fontSize(14).text('DATOS DEL CLIENTE', 50, 200);
+    doc.fontSize(14).text('DATOS DEL CLIENTE', 50, 220);
     doc.fontSize(12)
-       .text(`Nombre: ${venta.cliente.name}`, 50, 220)
-       .text(`Documento: ${venta.cliente.document}`, 50, 240)
-       .text(`Email: ${venta.cliente.email}`, 50, 260)
-       .text(`Teléfono: ${venta.cliente.phone}`, 50, 280);
+       .text(`Nombre: ${factura.cliente.nombre}`, 50, 240)
+       .text(`${factura.cliente.tipoIdentificacion || 'Documento'}: ${factura.cliente.numeroIdentificacion}`, 50, 260)
+       .text(`Email: ${factura.cliente.email}`, 50, 280)
+       .text(`Teléfono: ${factura.cliente.telefono}`, 50, 300);
 
-    // Información del trabajador
-    doc.fontSize(14).text('VENDEDOR', 50, 320);
-    doc.fontSize(12)
-       .text(`Nombre: ${venta.trabajador.nombre}`, 50, 340)
-       .text(`Email: ${venta.trabajador.correo}`, 50, 360);
+    // Información del trabajador (si existe en la venta)
+    if (venta && venta.trabajador) {
+      doc.fontSize(14).text('VENDEDOR', 50, 340);
+      doc.fontSize(12)
+         .text(`Nombre: ${venta.trabajador.nombre}`, 50, 360)
+         .text(`Email: ${venta.trabajador.correo}`, 50, 380);
+    }
 
     // Tabla de productos
-    let yPosition = 400;
+    let yPosition = venta && venta.trabajador ? 420 : 340;
     doc.fontSize(14).text('DETALLE DE PRODUCTOS', 50, yPosition);
     yPosition += 30;
 
@@ -2872,13 +3039,13 @@ const generateInvoicePDFBase64 = async (venta) => {
     yPosition += 10;
 
     // Productos
-    venta.productos.forEach(producto => {
+    factura.productos.forEach(producto => {
       doc.fontSize(9)
          .text(producto.code, 50, yPosition)
-         .text(producto.name, 120, yPosition)
+         .text(producto.name || producto.nombre, 120, yPosition)
          .text(producto.cantidad.toString(), 300, yPosition)
          .text(`$${producto.precioUnitario.toLocaleString()}`, 380, yPosition)
-         .text(`$${producto.total.toLocaleString()}`, 480, yPosition);
+         .text(`$${(producto.total || producto.subtotal).toLocaleString()}`, 480, yPosition);
       yPosition += 20;
     });
 
@@ -2889,24 +3056,63 @@ const generateInvoicePDFBase64 = async (venta) => {
 
     doc.fontSize(12)
        .text('SUBTOTAL:', 400, yPosition)
-       .text(`$${venta.totalVentaSinDescuento.toLocaleString()}`, 480, yPosition);
+       .text(`$${(factura.subtotal || factura.total).toLocaleString()}`, 480, yPosition);
     
-    if (venta.descuentoAplicado > 0) {
+    if (factura.descuentoAplicado > 0) {
       yPosition += 20;
-      doc.text('DESCUENTO:', 400, yPosition)
-         .text(`-$${venta.montoDescuento.toLocaleString()}`, 480, yPosition);
+      doc.text(`DESCUENTO (${factura.descuentoAplicado}%):`, 400, yPosition)
+         .text(`-$${factura.descuentoTotal.toLocaleString()}`, 480, yPosition);
+    }
+
+    if (factura.iva && factura.iva > 0) {
+      yPosition += 20;
+      doc.text(`IVA (${factura.iva}%):`, 400, yPosition)
+         .text(`$${factura.ivaTotal.toLocaleString()}`, 480, yPosition);
     }
 
     yPosition += 20;
     doc.fontSize(14).text('TOTAL:', 400, yPosition)
-       .text(`$${venta.totalVenta.toLocaleString()}`, 480, yPosition);
+       .text(`$${factura.total.toLocaleString()}`, 480, yPosition);
+
+    // Información de pagos si es financiado
+    if (factura.tipoVenta === 'financiado' || (factura.planAbonos && factura.planAbonos.length > 0)) {
+      yPosition += 30;
+      doc.fontSize(12).text(`Saldo Pendiente: $${factura.saldoPendiente.toLocaleString()}`, 400, yPosition);
+      
+      // Mostrar plan de abonos si existe
+      if (factura.planAbonos && factura.planAbonos.length > 0 && factura.planAbonos.length <= 5) {
+        yPosition += 30;
+        doc.fontSize(14).text('PLAN DE ABONOS', 50, yPosition);
+        yPosition += 20;
+        
+        factura.planAbonos.forEach((abono, index) => {
+          const estadoText = abono.estado === 'pagado' ? '✓' : '○';
+          const fechaText = moment(abono.fechaProgramada).format('DD/MM/YYYY');
+          doc.fontSize(10)
+             .text(`${estadoText} Abono ${abono.numero}: $${abono.monto.toLocaleString()} - ${fechaText}`, 50, yPosition);
+          
+          if (abono.estado === 'pagado' && abono.fechaPago) {
+            doc.text(`   Pagado: ${moment(abono.fechaPago).format('DD/MM/YYYY')} - $${abono.montoPagado.toLocaleString()}`, 50, yPosition + 12);
+            yPosition += 24;
+          } else {
+            yPosition += 16;
+          }
+        });
+      }
+    }
 
     // Método de pago
-    yPosition += 40;
-    doc.fontSize(12).text(`Método de Pago: ${venta.metodoPago}`, 50, yPosition);
+    yPosition += 20;
+    doc.fontSize(12).text(`Método de Pago: ${factura.metodoPago}`, 50, yPosition);
+
+    // Observaciones si existen
+    if (factura.observaciones) {
+      yPosition += 20;
+      doc.text(`Observaciones: ${factura.observaciones}`, 50, yPosition);
+    }
 
     // Pie de página
-    yPosition += 60;
+    yPosition += 40;
     doc.fontSize(10)
        .text('Gracias por su compra', 50, yPosition, { align: 'center' })
        .text('Sistema de Papelería - Medellín', 50, yPosition + 20, { align: 'center' });
@@ -3029,8 +3235,38 @@ const sendInvoiceByEmail = async (req, res) => {
       });
     }
 
+    // Buscar la factura relacionada
+    let factura = null;
+    if (venta.facturaId) {
+      factura = await db.collection('facturas').findOne({ _id: venta.facturaId });
+    }
+
+    // Si no hay factura, crear una temporal con datos de la venta
+    if (!factura) {
+      factura = {
+        numeroFactura: `VTA-${venta.code}`,
+        cliente: {
+          nombre: venta.cliente.name,
+          tipoIdentificacion: venta.cliente.tipoIdentificacion || 'CC',
+          numeroIdentificacion: venta.cliente.document,
+          email: venta.cliente.email,
+          telefono: venta.cliente.phone
+        },
+        productos: venta.productos,
+        total: venta.totalVenta,
+        subtotal: venta.totalVentaSinDescuento,
+        descuentoAplicado: venta.descuentoAplicado || 0,
+        descuentoTotal: venta.montoDescuento || 0,
+        metodoPago: venta.metodoPago,
+        fechaEmision: venta.fecha,
+        estado: venta.estadoPago === 'pagado' ? 'pagada' : 'pendiente',
+        saldoPendiente: venta.estadoPago === 'pagado' ? 0 : venta.totalVenta,
+        tipoVenta: venta.tipoVenta || 'contado'
+      };
+    }
+
     // Generar PDF en memoria
-    const pdfBuffer = await generateInvoicePDFBuffer(venta);
+    const pdfBuffer = await generateInvoicePDFBuffer(factura, venta);
 
     // Configurar transporter de nodemailer
     const transporter = nodemailer.createTransporter({
@@ -3047,25 +3283,42 @@ const sendInvoiceByEmail = async (req, res) => {
     const mailOptions = {
       from: process.env.SMTP_FROM || 'noreply@papeleria.com',
       to: email,
-      subject: subject || `Factura VTA-${venta.code} - Papelería Kevin`,
+      subject: subject || `Factura ${factura.numeroFactura} - Papelería Kevin`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #333; text-align: center;">Factura de Venta</h2>
-          <p>Estimado/a <strong>${venta.cliente.name}</strong>,</p>
-          <p>Adjunto encontrará la factura correspondiente a su compra realizada el ${moment(venta.fecha).format('DD/MM/YYYY')} a las ${venta.hora}.</p>
+          <p>Estimado/a <strong>${factura.cliente.nombre}</strong>,</p>
+          <p>Adjunto encontrará la factura correspondiente a su ${factura.tipoVenta === 'financiado' ? 'compra financiada' : 'compra'} realizada el ${moment(factura.fechaEmision).format('DD/MM/YYYY')}${venta && venta.hora ? ` a las ${venta.hora}` : ''}.</p>
           
           <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
             <h3 style="margin-top: 0; color: #333;">Detalles de la Factura:</h3>
-            <p><strong>Número de Factura:</strong> VTA-${venta.code}</p>
-            <p><strong>Fecha:</strong> ${moment(venta.fecha).format('DD/MM/YYYY')}</p>
-            <p><strong>Hora:</strong> ${venta.hora}</p>
-            <p><strong>Total:</strong> $${venta.totalVenta.toLocaleString()}</p>
-            <p><strong>Método de Pago:</strong> ${venta.metodoPago}</p>
+            <p><strong>Número de Factura:</strong> ${factura.numeroFactura}</p>
+            <p><strong>Fecha:</strong> ${moment(factura.fechaEmision).format('DD/MM/YYYY')}</p>
+            ${venta && venta.hora ? `<p><strong>Hora:</strong> ${venta.hora}</p>` : ''}
+            <p><strong>Total:</strong> $${factura.total.toLocaleString()}</p>
+            <p><strong>Estado:</strong> ${factura.estado.toUpperCase()}</p>
+            <p><strong>Método de Pago:</strong> ${factura.metodoPago}</p>
+            ${factura.tipoVenta === 'financiado' ? `<p><strong>Saldo Pendiente:</strong> $${factura.saldoPendiente.toLocaleString()}</p>` : ''}
           </div>
+
+          ${factura.tipoVenta === 'financiado' && factura.planAbonos && factura.planAbonos.length > 0 ? `
+            <div style="background-color: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #ffc107;">
+              <h4 style="margin-top: 0; color: #856404;">Plan de Abonos:</h4>
+              ${factura.planAbonos.slice(0, 3).map(abono => `
+                <p style="margin: 5px 0;">
+                  ${abono.estado === 'pagado' ? '✅' : '⏳'} 
+                  Abono ${abono.numero}: $${abono.monto.toLocaleString()} - 
+                  ${moment(abono.fechaProgramada).format('DD/MM/YYYY')}
+                  ${abono.estado === 'pagado' ? ' (PAGADO)' : ''}
+                </p>
+              `).join('')}
+              ${factura.planAbonos.length > 3 ? `<p style="color: #856404; font-style: italic;">Y ${factura.planAbonos.length - 3} abono(s) más...</p>` : ''}
+            </div>
+          ` : ''}
 
           ${message ? `<p><strong>Mensaje adicional:</strong><br>${message}</p>` : ''}
 
-          <p>Gracias por su compra en Papelería Kevin.</p>
+          <p>Gracias por su ${factura.tipoVenta === 'financiado' ? 'confianza' : 'compra'} en Papelería Kevin.</p>
           <p>Si tiene alguna pregunta, no dude en contactarnos.</p>
           
           <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
@@ -3077,7 +3330,7 @@ const sendInvoiceByEmail = async (req, res) => {
         </div>
       `,
       attachments: [{
-        filename: `factura-VTA-${venta.code}.pdf`,
+        filename: `factura-${factura.numeroFactura}.pdf`,
         content: pdfBuffer,
         contentType: 'application/pdf'
       }]
@@ -3091,8 +3344,11 @@ const sendInvoiceByEmail = async (req, res) => {
       message: "Factura enviada por email correctamente",
       data: {
         saleId: saleId,
+        facturaId: factura._id || null,
         email: email,
-        invoiceCode: `VTA-${venta.code}`,
+        numeroFactura: factura.numeroFactura,
+        invoiceCode: factura.numeroFactura, // Mantener compatibilidad
+        tipoVenta: factura.tipoVenta,
         sentAt: moment().tz('America/Bogota').format('YYYY-MM-DD HH:mm:ss')
       }
     });
@@ -3107,14 +3363,14 @@ const sendInvoiceByEmail = async (req, res) => {
   }
 };
 
-// Función auxiliar para generar PDF en buffer
-const generateInvoicePDFBuffer = async (venta) => {
+// Función auxiliar para generar PDF en buffer - Actualizada para usar factura
+const generateInvoicePDFBuffer = async (factura, venta = null) => {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ 
       size: 'A4',
       margin: 50,
       info: {
-        Title: `Factura VTA-${venta.code}`,
+        Title: `Factura ${factura.numeroFactura}`,
         Author: 'Sistema Papelería',
         Subject: 'Factura de Venta'
       }
@@ -3126,7 +3382,7 @@ const generateInvoicePDFBuffer = async (venta) => {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    // Diseño de la factura (mismo que en generateInvoicePDF)
+    // Diseño de la factura
     doc.fontSize(20).text('FACTURA DE VENTA', 50, 50, { align: 'center' });
     
     // Información de la empresa
@@ -3137,26 +3393,36 @@ const generateInvoicePDFBuffer = async (venta) => {
        .text('Teléfono: +57 300 123 4567', 50, 160);
 
     // Información de la factura
-    doc.text(`No. Factura: VTA-${venta.code}`, 400, 100)
-       .text(`Fecha: ${moment(venta.fecha).format('DD/MM/YYYY')}`, 400, 120)
-       .text(`Hora: ${venta.hora}`, 400, 140);
+    doc.text(`No. Factura: ${factura.numeroFactura}`, 400, 100)
+       .text(`Fecha: ${moment(factura.fechaEmision).format('DD/MM/YYYY')}`, 400, 120)
+       .text(`Estado: ${factura.estado.toUpperCase()}`, 400, 140);
+
+    // Si es financiado, mostrar información adicional
+    if (factura.tipoVenta === 'financiado' || (factura.planAbonos && factura.planAbonos.length > 0)) {
+      doc.text(`Tipo: FINANCIADO`, 400, 160);
+      if (factura.fechaVencimiento) {
+        doc.text(`Vencimiento: ${moment(factura.fechaVencimiento).format('DD/MM/YYYY')}`, 400, 180);
+      }
+    }
 
     // Información del cliente
-    doc.fontSize(14).text('DATOS DEL CLIENTE', 50, 200);
+    doc.fontSize(14).text('DATOS DEL CLIENTE', 50, 220);
     doc.fontSize(12)
-       .text(`Nombre: ${venta.cliente.name}`, 50, 220)
-       .text(`Documento: ${venta.cliente.document}`, 50, 240)
-       .text(`Email: ${venta.cliente.email}`, 50, 260)
-       .text(`Teléfono: ${venta.cliente.phone}`, 50, 280);
+       .text(`Nombre: ${factura.cliente.nombre}`, 50, 240)
+       .text(`${factura.cliente.tipoIdentificacion || 'Documento'}: ${factura.cliente.numeroIdentificacion}`, 50, 260)
+       .text(`Email: ${factura.cliente.email}`, 50, 280)
+       .text(`Teléfono: ${factura.cliente.telefono}`, 50, 300);
 
-    // Información del trabajador
-    doc.fontSize(14).text('VENDEDOR', 50, 320);
-    doc.fontSize(12)
-       .text(`Nombre: ${venta.trabajador.nombre}`, 50, 340)
-       .text(`Email: ${venta.trabajador.correo}`, 50, 360);
+    // Información del trabajador (si existe en la venta)
+    if (venta && venta.trabajador) {
+      doc.fontSize(14).text('VENDEDOR', 50, 340);
+      doc.fontSize(12)
+         .text(`Nombre: ${venta.trabajador.nombre}`, 50, 360)
+         .text(`Email: ${venta.trabajador.correo}`, 50, 380);
+    }
 
     // Tabla de productos
-    let yPosition = 400;
+    let yPosition = venta && venta.trabajador ? 420 : 340;
     doc.fontSize(14).text('DETALLE DE PRODUCTOS', 50, yPosition);
     yPosition += 30;
 
@@ -3175,13 +3441,13 @@ const generateInvoicePDFBuffer = async (venta) => {
     yPosition += 10;
 
     // Productos
-    venta.productos.forEach(producto => {
+    factura.productos.forEach(producto => {
       doc.fontSize(9)
          .text(producto.code, 50, yPosition)
-         .text(producto.name, 120, yPosition)
+         .text(producto.name || producto.nombre, 120, yPosition)
          .text(producto.cantidad.toString(), 300, yPosition)
          .text(`$${producto.precioUnitario.toLocaleString()}`, 380, yPosition)
-         .text(`$${producto.total.toLocaleString()}`, 480, yPosition);
+         .text(`$${(producto.total || producto.subtotal).toLocaleString()}`, 480, yPosition);
       yPosition += 20;
     });
 
@@ -3192,24 +3458,42 @@ const generateInvoicePDFBuffer = async (venta) => {
 
     doc.fontSize(12)
        .text('SUBTOTAL:', 400, yPosition)
-       .text(`$${venta.totalVentaSinDescuento.toLocaleString()}`, 480, yPosition);
+       .text(`$${(factura.subtotal || factura.total).toLocaleString()}`, 480, yPosition);
     
-    if (venta.descuentoAplicado > 0) {
+    if (factura.descuentoAplicado > 0) {
       yPosition += 20;
-      doc.text('DESCUENTO:', 400, yPosition)
-         .text(`-$${venta.montoDescuento.toLocaleString()}`, 480, yPosition);
+      doc.text(`DESCUENTO (${factura.descuentoAplicado}%):`, 400, yPosition)
+         .text(`-$${factura.descuentoTotal.toLocaleString()}`, 480, yPosition);
+    }
+
+    if (factura.iva && factura.iva > 0) {
+      yPosition += 20;
+      doc.text(`IVA (${factura.iva}%):`, 400, yPosition)
+         .text(`$${factura.ivaTotal.toLocaleString()}`, 480, yPosition);
     }
 
     yPosition += 20;
     doc.fontSize(14).text('TOTAL:', 400, yPosition)
-       .text(`$${venta.totalVenta.toLocaleString()}`, 480, yPosition);
+       .text(`$${factura.total.toLocaleString()}`, 480, yPosition);
+
+    // Información de pagos si es financiado
+    if (factura.tipoVenta === 'financiado' || (factura.planAbonos && factura.planAbonos.length > 0)) {
+      yPosition += 30;
+      doc.fontSize(12).text(`Saldo Pendiente: $${factura.saldoPendiente.toLocaleString()}`, 400, yPosition);
+    }
 
     // Método de pago
-    yPosition += 40;
-    doc.fontSize(12).text(`Método de Pago: ${venta.metodoPago}`, 50, yPosition);
+    yPosition += 20;
+    doc.fontSize(12).text(`Método de Pago: ${factura.metodoPago}`, 50, yPosition);
+
+    // Observaciones si existen
+    if (factura.observaciones) {
+      yPosition += 20;
+      doc.text(`Observaciones: ${factura.observaciones}`, 50, yPosition);
+    }
 
     // Pie de página
-    yPosition += 60;
+    yPosition += 40;
     doc.fontSize(10)
        .text('Gracias por su compra', 50, yPosition, { align: 'center' })
        .text('Sistema de Papelería - Medellín', 50, yPosition + 20, { align: 'center' });
