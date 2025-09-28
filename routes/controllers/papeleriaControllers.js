@@ -823,7 +823,12 @@ const createSale = async (req, res) => {
       cliente, // { name, document, email, phone }
       trabajador, // { correo, nombre }
       totalVenta: totalVentaPayload, // Total de venta del payload
-      descuentoAplicado // Descuento aplicado (opcional)
+      descuentoAplicado, // Descuento aplicado (opcional)
+      // NUEVOS CAMPOS PARA FINANCIAMIENTO
+      tipoVenta = 'contado', // 'contado' o 'financiado'
+      planAbonos = [], // Array de abonos programados si es financiado
+      diasVencimiento = 30, // Días para vencimiento si es financiado
+      observaciones = ''
     } = req.body;
     
     if (!code || typeof code !== 'string') {
@@ -840,10 +845,42 @@ const createSale = async (req, res) => {
       });
     }
     
-    if (!metodoPago || !['Efectivo', 'Nequi', 'Transferencia'].includes(metodoPago)) {
+    // Validar método de pago según tipo de venta
+    const metodosPagoValidos = tipoVenta === 'contado' 
+      ? ['Efectivo', 'Nequi', 'Transferencia'] 
+      : ['Efectivo', 'Nequi', 'Transferencia', 'Credito'];
+      
+    if (!metodoPago || !metodosPagoValidos.includes(metodoPago)) {
       return res.status(400).json({
         status: "Error",
-        message: "Debe especificar un método de pago válido."
+        message: `Debe especificar un método de pago válido: ${metodosPagoValidos.join(', ')}.`
+      });
+    }
+
+    // Si es financiado, validar plan de abonos
+    if (tipoVenta === 'financiado') {
+      if (!planAbonos || !Array.isArray(planAbonos) || planAbonos.length === 0) {
+        return res.status(400).json({
+          status: "Error",
+          message: "Para ventas financiadas debe proporcionar un plan de abonos."
+        });
+      }
+
+      // Validar que la suma de abonos coincida con el total
+      const totalAbonos = planAbonos.reduce((sum, abono) => sum + abono.monto, 0);
+      if (Math.abs(totalAbonos - (totalVentaPayload || 0)) > 1) {
+        return res.status(400).json({
+          status: "Error",
+          message: "La suma de los abonos debe coincidir con el total de la venta."
+        });
+      }
+    }
+
+    // Validar que el cliente esté completo para poder crear la factura
+    if (!cliente || !cliente.name || !cliente.document || !cliente.email || !cliente.phone) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Para crear la factura, los datos del cliente (name, document, email, phone) son obligatorios."
       });
     }
     
@@ -914,7 +951,7 @@ const createSale = async (req, res) => {
       }
     
       // Usar precios del payload si están disponibles, sino calcular desde la BD
-      const precioFinal = precioUnitario || prodInfo.price;
+      const precioFinal = precioUnitario || prodInfo.salePrice;
       const subtotal = total || (precioFinal * cantidad);
       totalVenta += subtotal;
     
@@ -950,27 +987,31 @@ const createSale = async (req, res) => {
     const descuentoInfo = calcularDescuento(totalVentaSinDescuento, descuentoAplicado);
     const totalVentaFinal = descuentoInfo.totalConDescuento;
     
-    // Guardar cliente si es válido y no existe
-    let clienteGuardado = null;
+    // SIEMPRE guardar/obtener cliente para la factura
+    let clienteId = null;
+    const existente = await clientesCol.findOne({ numeroIdentificacion: cliente.document });
     
-    if (
-      cliente &&
-      typeof cliente.name === 'string' &&
-      typeof cliente.document === 'string' &&
-      typeof cliente.email === 'string' &&
-      typeof cliente.phone === 'string'
-    ) {
-      const existente = await clientesCol.findOne({ document: cliente.document });
-      if (!existente) {
-        await clientesCol.insertOne({
-          name: cliente.name,
-          document: cliente.document,
-          email: cliente.email,
-          phone: cliente.phone,
-          createdAt: new Date()
-        });
-      }
-      clienteGuardado = cliente;
+    if (!existente) {
+      const nuevoCliente = {
+        tipoIdentificacion: cliente.tipoIdentificacion || 'CC',
+        numeroIdentificacion: cliente.document,
+        nombre: cliente.name,
+        email: cliente.email,
+        telefono: cliente.phone,
+        departamento: cliente.departamento || '',
+        ciudad: cliente.ciudad || '',
+        ubicacionLocal: cliente.ubicacionLocal || '',
+        tipoCliente: 'individual',
+        descuentoPersonalizado: 0,
+        estado: 'activo',
+        fechaRegistro: moment().tz("America/Bogota").format('YYYY-MM-DD HH:mm:ss'),
+        createdAt: new Date(),
+        lastUpdate: new Date()
+      };
+      await clientesCol.insertOne(nuevoCliente);
+      clienteId = nuevoCliente._id;
+    } else {
+      clienteId = existente._id;
     }
     
     const horaColombia = require('moment-timezone')().tz('America/Bogota').format('HH:mm:ss');
@@ -979,23 +1020,104 @@ const createSale = async (req, res) => {
       code,
       fecha: new Date(),
       hora: horaColombia,
-      cliente: clienteGuardado,
-      trabajador: trabajadorInfo, // NUEVO: Información del trabajador
+      cliente: cliente,
+      trabajador: trabajadorInfo,
       productos: detalleVenta,
       totalVenta: totalVentaFinal,
-      totalVentaSinDescuento: totalVentaSinDescuento, // Total antes del descuento
-      descuentoAplicado: descuentoInfo.descuentoAplicado, // Porcentaje de descuento
-      montoDescuento: descuentoInfo.montoDescuento, // Monto del descuento en pesos
+      totalVentaSinDescuento: totalVentaSinDescuento,
+      descuentoAplicado: descuentoInfo.descuentoAplicado,
+      montoDescuento: descuentoInfo.montoDescuento,
       metodoPago,
+      // NUEVOS CAMPOS
+      tipoVenta, // 'contado' o 'financiado'
+      estadoPago: tipoVenta === 'contado' ? 'pagado' : 'pendiente',
+      facturaId: null, // Se llenará cuando se cree la factura
+      observaciones,
       createdAt: new Date()
     };
     
     await ventasCol.insertOne(venta);
     
+    // SIEMPRE crear factura
+    const numeroFactura = await generateInvoiceNumber(db);
+    
+    const fechaEmision = new Date();
+    const fechaVencimiento = new Date();
+    fechaVencimiento.setDate(fechaEmision.getDate() + diasVencimiento);
+    
+    const factura = {
+      numeroFactura,
+      ventaId: venta._id, // RELACIÓN CON LA VENTA
+      clienteId: clienteId,
+      cliente: {
+        id: clienteId,
+        nombre: cliente.name,
+        tipoIdentificacion: cliente.tipoIdentificacion || 'CC',
+        numeroIdentificacion: cliente.document,
+        email: cliente.email,
+        telefono: cliente.phone,
+        ciudad: cliente.ciudad || '',
+        ubicacionLocal: cliente.ubicacionLocal || ''
+      },
+      productos: detalleVenta,
+      subtotal: totalVentaSinDescuento,
+      descuentoAplicado: descuentoInfo.descuentoAplicado,
+      descuentoTotal: descuentoInfo.montoDescuento,
+      iva: 0,
+      ivaTotal: 0,
+      total: totalVentaFinal,
+      estado: tipoVenta === 'contado' ? 'pagada' : 'pendiente',
+      metodoPago,
+      observaciones,
+      fechaEmision,
+      fechaVencimiento,
+      saldoPendiente: tipoVenta === 'contado' ? 0 : totalVentaFinal,
+      abonos: [],
+      // Solo agregar plan de abonos si es financiado
+      ...(tipoVenta === 'financiado' && {
+        planAbonos: planAbonos.map((abono, index) => ({
+          numero: index + 1,
+          monto: abono.monto,
+          fechaProgramada: new Date(abono.fechaProgramada),
+          estado: 'pendiente',
+          fechaPago: null,
+          montoPagado: 0,
+          observaciones: abono.observaciones || ''
+        }))
+      }),
+      createdAt: new Date(),
+      lastUpdate: new Date()
+    };
+    
+    await db.collection('facturas').insertOne(factura);
+    
+    // Actualizar la venta con el ID de la factura
+    await ventasCol.updateOne(
+      { _id: venta._id },
+      { $set: { facturaId: factura._id } }
+    );
+    
     res.status(201).json({
       status: "Success",
-      message: "Venta registrada correctamente.",
-      data: venta
+      message: "Venta y factura registradas correctamente.",
+      data: {
+        venta: {
+          ...venta,
+          facturaId: factura._id
+        },
+        factura: {
+          id: factura._id,
+          numeroFactura: factura.numeroFactura,
+          cliente: factura.cliente,
+          total: factura.total,
+          estado: factura.estado,
+          fechaEmision: factura.fechaEmision,
+          fechaVencimiento: factura.fechaVencimiento,
+          saldoPendiente: factura.saldoPendiente
+        },
+        tipoVenta,
+        estadoPago: venta.estadoPago
+      }
     });
   } catch (error) {
     console.error("Error al registrar la venta:", error);
@@ -4998,6 +5120,398 @@ const getPaymentAnalysis = async (req, res) => {
   }
 };
 
+// Función para confirmar abonos desde el panel admin
+const confirmPayment = async (req, res) => {
+  try {
+    const db = await getDb();
+    const {
+      facturaId,
+      numeroAbono, // Número del abono en el plan (1, 2, 3, etc.) o null para abono libre
+      montoPagado,
+      metodoPago,
+      observaciones = '',
+      usuarioConfirma,
+      fechaPago = new Date()
+    } = req.body;
+
+    // Validaciones
+    if (!facturaId || !montoPagado || !metodoPago) {
+      return res.status(400).json({
+        status: "Error",
+        message: "facturaId, montoPagado y metodoPago son obligatorios."
+      });
+    }
+
+    if (montoPagado <= 0) {
+      return res.status(400).json({
+        status: "Error",
+        message: "El monto pagado debe ser mayor a 0."
+      });
+    }
+
+    // Buscar la factura
+    const factura = await db.collection('facturas').findOne({ _id: new ObjectId(facturaId) });
+    if (!factura) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Factura no encontrada."
+      });
+    }
+
+    // Verificar que la factura no esté pagada o cancelada
+    if (factura.estado === 'pagada') {
+      return res.status(400).json({
+        status: "Error",
+        message: "Esta factura ya está completamente pagada."
+      });
+    }
+
+    if (factura.estado === 'cancelada') {
+      return res.status(400).json({
+        status: "Error",
+        message: "No se pueden confirmar abonos en facturas canceladas."
+      });
+    }
+
+    // Verificar que el abono no exceda el saldo pendiente
+    if (montoPagado > factura.saldoPendiente) {
+      return res.status(400).json({
+        status: "Error",
+        message: `El abono no puede exceder el saldo pendiente de $${factura.saldoPendiente}.`
+      });
+    }
+
+    // Buscar el abono en el plan (solo si existe plan de abonos y se especifica número)
+    let abonoPlaneado = null;
+    let abonoIndex = -1;
+    
+    if (numeroAbono && factura.planAbonos && factura.planAbonos.length > 0) {
+      abonoIndex = factura.planAbonos.findIndex(abono => abono.numero === numeroAbono);
+      if (abonoIndex === -1) {
+        return res.status(404).json({
+          status: "Error",
+          message: "Abono no encontrado en el plan de pagos."
+        });
+      }
+      
+      abonoPlaneado = factura.planAbonos[abonoIndex];
+      
+      // Verificar si el abono ya está pagado
+      if (abonoPlaneado.estado === 'pagado') {
+        return res.status(400).json({
+          status: "Error",
+          message: "Este abono ya está marcado como pagado."
+        });
+      }
+    }
+
+    // Crear el registro del abono real
+    const abonoReal = {
+      facturaId: new ObjectId(facturaId),
+      clienteId: factura.clienteId,
+      numeroAbono: numeroAbono || (factura.abonos.length + 1),
+      montoPlaneado: abonoPlaneado ? abonoPlaneado.monto : montoPagado,
+      montoPagado: Number(montoPagado),
+      diferencia: abonoPlaneado ? Number(montoPagado) - abonoPlaneado.monto : 0,
+      metodoPago,
+      observaciones,
+      usuarioConfirma: usuarioConfirma || 'Sistema',
+      fechaPago: new Date(fechaPago),
+      fechaPlaneada: abonoPlaneado ? abonoPlaneado.fechaProgramada : new Date(),
+      esAbonoLibre: !abonoPlaneado, // Indica si es un abono fuera del plan
+      createdAt: new Date()
+    };
+
+    // Insertar el abono real
+    await db.collection('abonos').insertOne(abonoReal);
+
+    // Calcular nuevo saldo pendiente
+    const nuevoSaldoPendiente = factura.saldoPendiente - Number(montoPagado);
+    
+    // Determinar nuevo estado de la factura
+    let nuevoEstado = factura.estado;
+    if (nuevoSaldoPendiente <= 0) {
+      nuevoEstado = 'pagada';
+    } else {
+      // Verificar si hay abonos vencidos en el plan
+      if (factura.planAbonos && factura.planAbonos.length > 0) {
+        const abonosVencidos = factura.planAbonos.filter(abono => 
+          abono.estado === 'pendiente' && new Date(abono.fechaProgramada) < new Date()
+        );
+        
+        if (abonosVencidos.length > 0) {
+          nuevoEstado = 'vencida';
+        } else {
+          nuevoEstado = 'parcialmente_pagada';
+        }
+      } else {
+        // Sin plan de abonos, verificar vencimiento general
+        if (new Date(factura.fechaVencimiento) < new Date()) {
+          nuevoEstado = 'vencida';
+        } else {
+          nuevoEstado = 'parcialmente_pagada';
+        }
+      }
+    }
+
+    // Preparar actualización de factura
+    const updateFields = {
+      saldoPendiente: Math.max(0, nuevoSaldoPendiente),
+      estado: nuevoEstado,
+      lastUpdate: new Date()
+    };
+
+    // Si hay plan de abonos y se especificó número, actualizarlo
+    if (factura.planAbonos && abonoIndex !== -1) {
+      const planAbonosActualizado = [...factura.planAbonos];
+      planAbonosActualizado[abonoIndex] = {
+        ...abonoPlaneado,
+        estado: 'pagado',
+        fechaPago: new Date(fechaPago),
+        montoPagado: Number(montoPagado),
+        observaciones: observaciones
+      };
+      updateFields.planAbonos = planAbonosActualizado;
+    }
+
+    // Actualizar la factura
+    await db.collection('facturas').updateOne(
+      { _id: new ObjectId(facturaId) },
+      {
+        $set: updateFields,
+        $push: { 
+          abonos: {
+            ...abonoReal,
+            _id: abonoReal._id
+          }
+        }
+      }
+    );
+
+    // Si la factura está completamente pagada, actualizar la venta relacionada
+    if (nuevoEstado === 'pagada' && factura.ventaId) {
+      await db.collection('ventas').updateOne(
+        { _id: factura.ventaId },
+        { $set: { estadoPago: 'pagado' } }
+      );
+    }
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Abono confirmado correctamente.",
+      data: {
+        abonoId: abonoReal._id,
+        numeroAbono: abonoReal.numeroAbono,
+        montoPagado: Number(montoPagado),
+        diferencia: abonoReal.diferencia,
+        saldoAnterior: factura.saldoPendiente,
+        saldoNuevo: Math.max(0, nuevoSaldoPendiente),
+        estadoFactura: nuevoEstado,
+        fechaPago: abonoReal.fechaPago,
+        esAbonoLibre: abonoReal.esAbonoLibre
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al confirmar abono:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al confirmar el abono.",
+      error: error.message
+    });
+  }
+};
+
+// Función para obtener dashboard de abonos pendientes
+const getPaymentsDashboard = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { fecha = null } = req.query;
+
+    const fechaConsulta = fecha ? new Date(fecha) : new Date();
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    // Obtener todas las facturas pendientes
+    const facturasPendientes = await db.collection('facturas')
+      .find({ 
+        estado: { $in: ['pendiente', 'parcialmente_pagada', 'vencida'] },
+        saldoPendiente: { $gt: 0 }
+      })
+      .toArray();
+
+    const abonosHoy = [];
+    const abonosVencidos = [];
+    const abonosProximos = [];
+    const facturasSinPlan = [];
+
+    // Procesar facturas
+    facturasPendientes.forEach(factura => {
+      // Si tiene plan de abonos, procesar cada abono
+      if (factura.planAbonos && factura.planAbonos.length > 0) {
+        factura.planAbonos.forEach(abono => {
+          if (abono.estado === 'pendiente') {
+            const fechaAbono = new Date(abono.fechaProgramada);
+            const item = {
+              facturaId: factura._id,
+              numeroFactura: factura.numeroFactura,
+              cliente: factura.cliente,
+              numeroAbono: abono.numero,
+              monto: abono.monto,
+              fechaProgramada: abono.fechaProgramada,
+              diasVencido: Math.ceil((hoy - fechaAbono) / (1000 * 60 * 60 * 24)),
+              tieneVenta: !!factura.ventaId,
+              tienePlan: true
+            };
+
+            // Clasificar abonos
+            if (fechaAbono.toDateString() === hoy.toDateString()) {
+              abonosHoy.push(item);
+            } else if (fechaAbono < hoy) {
+              abonosVencidos.push(item);
+            } else {
+              const diasHasta = Math.ceil((fechaAbono - hoy) / (1000 * 60 * 60 * 24));
+              if (diasHasta <= 7) {
+                abonosProximos.push({ ...item, diasHasta });
+              }
+            }
+          }
+        });
+      } else {
+        // Sin plan de abonos, usar fecha de vencimiento de la factura
+        const fechaVencimiento = new Date(factura.fechaVencimiento);
+        const item = {
+          facturaId: factura._id,
+          numeroFactura: factura.numeroFactura,
+          cliente: factura.cliente,
+          numeroAbono: null,
+          monto: factura.saldoPendiente,
+          fechaProgramada: factura.fechaVencimiento,
+          diasVencido: Math.ceil((hoy - fechaVencimiento) / (1000 * 60 * 60 * 24)),
+          tieneVenta: !!factura.ventaId,
+          tienePlan: false
+        };
+
+        facturasSinPlan.push(item);
+
+        if (fechaVencimiento < hoy) {
+          abonosVencidos.push(item);
+        } else if (fechaVencimiento.toDateString() === hoy.toDateString()) {
+          abonosHoy.push(item);
+        }
+      }
+    });
+
+    // Calcular totales
+    const totales = {
+      abonosHoy: {
+        cantidad: abonosHoy.length,
+        monto: abonosHoy.reduce((sum, a) => sum + a.monto, 0)
+      },
+      abonosVencidos: {
+        cantidad: abonosVencidos.length,
+        monto: abonosVencidos.reduce((sum, a) => sum + a.monto, 0)
+      },
+      abonosProximos: {
+        cantidad: abonosProximos.length,
+        monto: abonosProximos.reduce((sum, a) => sum + a.monto, 0)
+      },
+      facturasConPlan: facturasPendientes.filter(f => f.planAbonos && f.planAbonos.length > 0).length,
+      facturasSinPlan: facturasSinPlan.length,
+      totalFacturasPendientes: facturasPendientes.length,
+      montoTotalPendiente: facturasPendientes.reduce((sum, f) => sum + f.saldoPendiente, 0)
+    };
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Dashboard de abonos obtenido correctamente.",
+      data: {
+        totales,
+        abonosHoy,
+        abonosVencidos: abonosVencidos.slice(0, 20),
+        abonosProximos: abonosProximos.slice(0, 10),
+        facturasSinPlan: facturasSinPlan.slice(0, 10),
+        fechaConsulta: fechaConsulta
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al obtener dashboard de abonos:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al obtener el dashboard.",
+      error: error.message
+    });
+  }
+};
+
+// Función para obtener factura con plan de abonos y venta relacionada
+const getInvoiceWithPaymentPlan = async (req, res) => {
+  try {
+    const db = await getDb();
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de la factura es requerido."
+      });
+    }
+
+    const factura = await db.collection('facturas').findOne({ _id: new ObjectId(id) });
+
+    if (!factura) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Factura no encontrada."
+      });
+    }
+
+    // Obtener la venta relacionada
+    const venta = factura.ventaId ? 
+      await db.collection('ventas').findOne({ _id: factura.ventaId }) : null;
+
+    // Obtener abonos reales
+    const abonosReales = await db.collection('abonos')
+      .find({ facturaId: new ObjectId(id) })
+      .sort({ fechaPago: -1 })
+      .toArray();
+
+    // Calcular estadísticas del plan de abonos
+    const estadisticasPlan = {
+      totalAbonos: factura.planAbonos?.length || 0,
+      abonosPagados: factura.planAbonos?.filter(a => a.estado === 'pagado').length || 0,
+      abonosPendientes: factura.planAbonos?.filter(a => a.estado === 'pendiente').length || 0,
+      abonosVencidos: factura.planAbonos?.filter(a => 
+        a.estado === 'pendiente' && new Date(a.fechaProgramada) < new Date()
+      ).length || 0,
+      totalPlaneado: factura.planAbonos?.reduce((sum, a) => sum + a.monto, 0) || 0,
+      totalPagado: abonosReales.reduce((sum, a) => sum + a.montoPagado, 0),
+      diferenciaPagos: abonosReales.reduce((sum, a) => sum + (a.diferencia || 0), 0),
+      abonosLibres: abonosReales.filter(a => a.esAbonoLibre).length
+    };
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Factura con plan de abonos obtenida correctamente.",
+      data: {
+        factura,
+        venta,
+        abonosReales,
+        estadisticasPlan
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al obtener factura con plan de abonos:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno al obtener la factura.",
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
     registertrabajador,
     loginTrabajador,
@@ -5053,6 +5567,10 @@ module.exports = {
     generateInvoicePDF,
     sendInvoiceByEmail,
     sendInvoiceToN8N,
-    testN8NConnection
+    testN8NConnection,
+    // NUEVAS FUNCIONES PARA GESTIÓN DE ABONOS
+    confirmPayment,
+    getPaymentsDashboard,
+    getInvoiceWithPaymentPlan
     
 };
