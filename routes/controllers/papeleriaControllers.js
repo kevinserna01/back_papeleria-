@@ -2771,11 +2771,21 @@ const sendInvoiceToN8N = async (req, res) => {
     const { saleId, email, subject, message } = req.body;
     const db = await getDb();
     
+    // Debug: Log del request body
+    console.log('Request body recibido en sendInvoiceToN8N:', req.body);
+    console.log('Headers:', req.headers);
+    
     // Validaciones
     if (!saleId || !email) {
       return res.status(400).json({
         status: "Error",
-        message: "saleId y email son obligatorios"
+        message: "saleId y email son obligatorios",
+        received: {
+          saleId: saleId || 'undefined',
+          email: email || 'undefined',
+          bodyKeys: Object.keys(req.body || {}),
+          bodyType: typeof req.body
+        }
       });
     }
 
