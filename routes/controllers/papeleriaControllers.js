@@ -6028,6 +6028,12 @@ const getInvoiceWithPaymentPlan = async (req, res) => {
       .toArray();
 
     // Calcular estadísticas del plan de abonos
+    const totalPagadoReales = abonosReales.reduce((sum, a) => sum + a.montoPagado, 0);
+    const totalPagadoPlan = factura.planAbonos?.filter(a => a.estado === 'pagado').reduce((sum, a) => sum + (a.montoPagado || a.monto), 0) || 0;
+    
+    // Usar el mayor entre los abonos reales y los del plan
+    const totalPagado = Math.max(totalPagadoReales, totalPagadoPlan);
+    
     const estadisticasPlan = {
       totalAbonos: factura.planAbonos?.length || 0,
       abonosPagados: factura.planAbonos?.filter(a => a.estado === 'pagado').length || 0,
@@ -6036,9 +6042,10 @@ const getInvoiceWithPaymentPlan = async (req, res) => {
         a.estado === 'pendiente' && new Date(a.fechaProgramada) < new Date()
       ).length || 0,
       totalPlaneado: factura.planAbonos?.reduce((sum, a) => sum + a.monto, 0) || 0,
-      totalPagado: abonosReales.reduce((sum, a) => sum + a.montoPagado, 0),
+      totalPagado: totalPagado,
       diferenciaPagos: abonosReales.reduce((sum, a) => sum + (a.diferencia || 0), 0),
-      abonosLibres: abonosReales.filter(a => a.esAbonoLibre).length
+      abonosLibres: abonosReales.filter(a => a.esAbonoLibre).length,
+      saldoPendiente: factura.total - totalPagado
     };
 
     return res.status(200).json({
@@ -6057,6 +6064,110 @@ const getInvoiceWithPaymentPlan = async (req, res) => {
     return res.status(500).json({
       status: "Error",
       message: "Error interno al obtener la factura.",
+      error: error.message
+    });
+  }
+};
+
+// ==================== FUNCIONES PARA SUGERENCIA DE ABONOS ====================
+
+/**
+ * Sugiere montos automáticamente para un plan de abonos
+ */
+const suggestPaymentAmounts = async (req, res) => {
+  try {
+    const { facturaId, numeroAbonos, abonosExistentes = [] } = req.body;
+
+    if (!facturaId || !numeroAbonos) {
+      return res.status(400).json({
+        status: "Error",
+        message: "facturaId y numeroAbonos son requeridos"
+      });
+    }
+
+    // Validar formato de ObjectId
+    if (!isValidObjectId(facturaId)) {
+      return res.status(400).json({
+        status: "Error",
+        message: "ID de factura inválido"
+      });
+    }
+
+    const db = await getDb();
+    const factura = await db.collection('facturas').findOne({ _id: new ObjectId(facturaId) });
+    
+    if (!factura) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Factura no encontrada"
+      });
+    }
+
+    // Calcular monto total disponible para distribuir
+    const montoTotal = factura.total;
+    const montoAsignado = abonosExistentes.reduce((sum, abono) => sum + (Number(abono.monto) || 0), 0);
+    const montoDisponible = montoTotal - montoAsignado;
+    const abonosRestantes = numeroAbonos - abonosExistentes.length;
+
+    if (abonosRestantes <= 0) {
+      return res.status(400).json({
+        status: "Error",
+        message: "No hay abonos restantes para sugerir"
+      });
+    }
+
+    if (montoDisponible <= 0) {
+      return res.status(400).json({
+        status: "Error",
+        message: "El monto total ya ha sido asignado a los abonos existentes"
+      });
+    }
+
+    // Calcular monto base por abono
+    const montoBase = Math.floor(montoDisponible / abonosRestantes);
+    const residuo = montoDisponible - (montoBase * abonosRestantes);
+
+    // Generar sugerencias
+    const sugerencias = [];
+    for (let i = 0; i < abonosRestantes; i++) {
+      let monto = montoBase;
+      
+      // Agregar el residuo al último abono
+      if (i === abonosRestantes - 1) {
+        monto += residuo;
+      }
+
+      sugerencias.push({
+        numero: abonosExistentes.length + i + 1,
+        monto: monto,
+        fechaProgramada: new Date(Date.now() + (i + 1) * 30 * 24 * 60 * 60 * 1000), // 30 días entre abonos
+        estado: 'pendiente',
+        observaciones: `Abono ${abonosExistentes.length + i + 1}`,
+        esFlexible: true
+      });
+    }
+
+    return res.status(200).json({
+      status: "Success",
+      message: "Sugerencias de montos generadas correctamente",
+      data: {
+        facturaId: facturaId,
+        totalFactura: montoTotal,
+        montoAsignado: montoAsignado,
+        montoDisponible: montoDisponible,
+        abonosExistentes: abonosExistentes.length,
+        abonosRestantes: abonosRestantes,
+        sugerencias: sugerencias,
+        totalSugerido: sugerencias.reduce((sum, abono) => sum + abono.monto, 0),
+        diferencia: montoDisponible - sugerencias.reduce((sum, abono) => sum + abono.monto, 0)
+      }
+    });
+
+  } catch (error) {
+    console.error('Error generando sugerencias de abonos:', error);
+    return res.status(500).json({
+      status: "Error",
+      message: "Error interno del servidor",
       error: error.message
     });
   }
@@ -6810,6 +6921,8 @@ module.exports = {
     verifyOTPAndCompleteLogin,
     resendOTPCode,
     // FUNCIONES DE DIAGNÓSTICO
-    testN8NWebhook
+    testN8NWebhook,
+    // FUNCIONES PARA SUGERENCIA DE ABONOS
+    suggestPaymentAmounts
     
 };
