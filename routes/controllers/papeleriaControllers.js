@@ -6467,9 +6467,17 @@ const verifyOTPAndCompleteLogin = async (req, res) => {
         let userInfo = null;
         
         if (userType === 'trabajador') {
+            // Buscar primero en trabajadores, luego en usuarios
             userInfo = await db.collection('trabajadores').findOne({ _id: new ObjectId(userId) });
+            if (!userInfo) {
+                userInfo = await db.collection('usuarios').findOne({ _id: new ObjectId(userId) });
+            }
         } else if (userType === 'admin') {
+            // Buscar primero en administradores, luego en usuarios
             userInfo = await db.collection('administradores').findOne({ _id: new ObjectId(userId) });
+            if (!userInfo) {
+                userInfo = await db.collection('usuarios').findOne({ _id: new ObjectId(userId) });
+            }
         }
         
         if (!userInfo) {
@@ -6485,8 +6493,8 @@ const verifyOTPAndCompleteLogin = async (req, res) => {
             message: "Código verificado correctamente. Login completado.",
             user: {
                 id: userInfo._id,
-                nombre: userInfo.nombre,
-                correo: userInfo.correo,
+                nombre: userInfo.name || userInfo.nombre,
+                correo: userInfo.email || userInfo.correo,
                 role: userType,
                 loginCompleted: true
             }
@@ -6528,9 +6536,17 @@ const resendOTPCode = async (req, res) => {
         let userInfo = null;
         
         if (userType === 'trabajador') {
+            // Buscar primero en trabajadores, luego en usuarios
             userInfo = await db.collection('trabajadores').findOne({ _id: new ObjectId(userId) });
+            if (!userInfo) {
+                userInfo = await db.collection('usuarios').findOne({ _id: new ObjectId(userId) });
+            }
         } else if (userType === 'admin') {
+            // Buscar primero en administradores, luego en usuarios
             userInfo = await db.collection('administradores').findOne({ _id: new ObjectId(userId) });
+            if (!userInfo) {
+                userInfo = await db.collection('usuarios').findOne({ _id: new ObjectId(userId) });
+            }
         }
         
         if (!userInfo) {
