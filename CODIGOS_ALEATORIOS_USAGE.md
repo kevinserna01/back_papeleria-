@@ -18,6 +18,7 @@ Sistema implementado para generar códigos aleatorios de 6 dígitos que expiran 
 Los códigos se generan automáticamente después de un login exitoso en:
 - `POST /logintrabajador` - Login de trabajador
 - `POST /loginadminapi` - Login de administrador
+- `POST /loginUserapi` - Login de usuario general (trabajadores y administradores)
 
 **Respuesta del login (SIN código):**
 ```json
@@ -221,7 +222,7 @@ Agregar al archivo `.env`:
 
 ```env
 # Configuración N8N para Envío de Códigos OTP
-N8N_WEBHOOK_URL=http://localhost:5678/webhook/send-otp
+N8N_WEBHOOK_URL_LOGIN=http://localhost:5678/webhook/send-otp
 ```
 
 ### Configuración por Ambiente
@@ -233,10 +234,10 @@ N8N_WEBHOOK_URL=http://localhost:5678/webhook/send-otp
 ## Integración con N8N
 
 ### Webhook URL
-Configurado en la variable de entorno `N8N_WEBHOOK_URL` en el archivo `.env`:
+Configurado en la variable de entorno `N8N_WEBHOOK_URL_LOGIN` en el archivo `.env`:
 
 ```env
-N8N_WEBHOOK_URL=http://localhost:5678/webhook/send-otp
+N8N_WEBHOOK_URL_LOGIN=http://localhost:5678/webhook/send-otp
 ```
 
 **Valor por defecto:** `http://localhost:5678/webhook/send-otp` (si no está configurado)
@@ -262,12 +263,12 @@ El webhook debe estar configurado para:
 
 ### Manejo de Errores
 
-**Si `N8N_WEBHOOK_URL` no está configurado:**
+**Si `N8N_WEBHOOK_URL_LOGIN` no está configurado:**
 ```json
 {
   "success": false,
   "message": "Configuración de webhook N8N no encontrada",
-  "error": "N8N_WEBHOOK_URL no está definido en .env"
+  "error": "N8N_WEBHOOK_URL_LOGIN no está definido en .env"
 }
 ```
 

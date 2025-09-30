@@ -2537,15 +2537,26 @@ const loginUser = async (req, res) => {
       };
     }
 
+    // Generar código aleatorio después del login exitoso
+    const codeData = await generateRandomCode(user._id.toString(), user.role === 'admin' ? 'admin' : 'trabajador');
+    
+    // Enviar código por email
+    const emailResult = await sendOTPByEmail(user.email, codeData.code, user.name, user.role === 'admin' ? 'admin' : 'trabajador');
+
     return res.status(200).json({
       status: "Success",
-      message: "Inicio de sesión exitoso.",
+      message: "Credenciales correctas. Se ha enviado un código de verificación a tu email.",
+      requiresVerification: true,
+      userId: user._id.toString(),
+      userType: user.role === 'admin' ? 'admin' : 'trabajador',
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
         role: user.role
-      }
+      },
+      emailSent: emailResult.success,
+      emailMessage: emailResult.success ? "Código enviado exitosamente" : "Error enviando código por email"
     });
 
   } catch (error) {
