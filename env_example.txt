@@ -12,6 +12,9 @@ SMTP_USER=tu-email@gmail.com
 SMTP_PASS=tu-password-de-aplicacion
 SMTP_FROM=noreply@papeleria.com
 
+# Configuración N8N para Envío de Códigos OTP
+N8N_WEBHOOK_URL=http://localhost:5678/webhook/send-otp
+
 # URL Base del Backend (opcional)
 BASE_URL=https://back-papeleria-two.vercel.app
 

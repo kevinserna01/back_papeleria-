@@ -75,7 +75,22 @@ const registertrabajador = async (req, res) => {
         // Insertar el log en la colección de logs
         await db.collection('logs').insertOne(logEntry);
 
-        res.status(200).json({ status: "Éxito", message: "Inicio de sesión exitoso", logEntry });
+        // Generar código aleatorio después del login exitoso
+        const codeData = await generateRandomCode(user._id.toString(), 'trabajador');
+        
+        // Enviar código por email
+        const emailResult = await sendOTPByEmail(user.correo, codeData.code, user.nombre, 'trabajador');
+
+        res.status(200).json({ 
+            status: "Éxito", 
+            message: "Credenciales correctas. Se ha enviado un código de verificación a tu email.", 
+            logEntry,
+            requiresVerification: true,
+            userId: user._id.toString(),
+            userType: 'trabajador',
+            emailSent: emailResult.success,
+            emailMessage: emailResult.success ? "Código enviado exitosamente" : "Error enviando código por email"
+        });
     } catch (error) {
         console.error('Error al iniciar sesión:', error);
         res.status(500).json({ status: "Error", message: "Internal Server Error" });
@@ -2153,14 +2168,25 @@ const loginadmin = async (req, res) => {
       });
     }
 
+    // Generar código aleatorio después del login exitoso
+    const codeData = await generateRandomCode(admin._id.toString(), 'admin');
+    
+    // Enviar código por email
+    const emailResult = await sendOTPByEmail(admin.correo, codeData.code, admin.nombre || 'Administrador', 'admin');
+
     return res.status(200).json({
       status: "Success",
-      message: "Login exitoso",
+      message: "Credenciales correctas. Se ha enviado un código de verificación a tu email.",
+      requiresVerification: true,
+      userId: admin._id.toString(),
+      userType: 'admin',
       admin: {
         id: admin._id,
         correo: admin.correo,
         role: 'admin'
-      }
+      },
+      emailSent: emailResult.success,
+      emailMessage: emailResult.success ? "Código enviado exitosamente" : "Error enviando código por email"
     });
 
   } catch (error) {
@@ -6025,6 +6051,538 @@ const getInvoiceWithPaymentPlan = async (req, res) => {
   }
 };
 
+// ==================== FUNCIONES PARA CÓDIGOS ALEATORIOS ====================
+
+/**
+ * Genera un código aleatorio de 6 dígitos que expira en 5 minutos
+ * @param {string} userId - ID del usuario
+ * @param {string} userType - Tipo de usuario ('trabajador' o 'admin')
+ * @returns {Object} - Objeto con el código generado y su expiración
+ */
+const generateRandomCode = async (userId, userType) => {
+    try {
+        const db = await getDb();
+        
+        // Generar código aleatorio de 6 dígitos
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        // Calcular fecha de expiración (5 minutos desde ahora)
+        const expirationTime = new Date(Date.now() + 5 * 60 * 1000);
+        
+        // Crear documento del código
+        const codeDocument = {
+            code,
+            userId,
+            userType,
+            createdAt: new Date(),
+            expiresAt: expirationTime,
+            isUsed: false,
+            usedAt: null
+        };
+        
+        // Guardar en la base de datos
+        await db.collection('random_codes').insertOne(codeDocument);
+        
+        // Limpiar códigos expirados en segundo plano
+        cleanupExpiredCodes();
+        
+        return {
+            code,
+            expiresAt: expirationTime,
+            expiresIn: 5 * 60 * 1000 // 5 minutos en milisegundos
+        };
+        
+    } catch (error) {
+        console.error('Error generando código aleatorio:', error);
+        throw error;
+    }
+};
+
+/**
+ * Valida un código aleatorio
+ * @param {string} code - Código a validar
+ * @param {string} userId - ID del usuario
+ * @param {string} userType - Tipo de usuario
+ * @returns {Object} - Resultado de la validación
+ */
+const validateRandomCode = async (code, userId, userType) => {
+    try {
+        const db = await getDb();
+        
+        // Buscar el código en la base de datos
+        const codeDocument = await db.collection('random_codes').findOne({
+            code,
+            userId,
+            userType,
+            isUsed: false
+        });
+        
+        if (!codeDocument) {
+            return {
+                valid: false,
+                message: "Código inválido o ya utilizado"
+            };
+        }
+        
+        // Verificar si el código ha expirado
+        const now = new Date();
+        if (now > codeDocument.expiresAt) {
+            // Marcar como usado para limpieza
+            await db.collection('random_codes').updateOne(
+                { _id: codeDocument._id },
+                { $set: { isUsed: true, usedAt: now } }
+            );
+            
+            return {
+                valid: false,
+                message: "Código expirado"
+            };
+        }
+        
+        // Marcar el código como usado
+        await db.collection('random_codes').updateOne(
+            { _id: codeDocument._id },
+            { $set: { isUsed: true, usedAt: now } }
+        );
+        
+        return {
+            valid: true,
+            message: "Código válido"
+        };
+        
+    } catch (error) {
+        console.error('Error validando código aleatorio:', error);
+        throw error;
+    }
+};
+
+/**
+ * Limpia códigos expirados de la base de datos
+ * Esta función se ejecuta automáticamente pero también puede ser llamada manualmente
+ */
+const cleanupExpiredCodes = async () => {
+    try {
+        const db = await getDb();
+        const now = new Date();
+        
+        // Eliminar códigos expirados o usados
+        const result = await db.collection('random_codes').deleteMany({
+            $or: [
+                { expiresAt: { $lt: now } },
+                { isUsed: true }
+            ]
+        });
+        
+        console.log(`Códigos limpiados: ${result.deletedCount}`);
+        
+    } catch (error) {
+        console.error('Error limpiando códigos expirados:', error);
+    }
+};
+
+/**
+ * Endpoint para generar código aleatorio después del login
+ */
+const generateCodeAfterLogin = async (req, res) => {
+    const { userId, userType } = req.body;
+    
+    try {
+        if (!userId || !userType) {
+            return res.status(400).json({
+                status: "Error",
+                message: "userId y userType son requeridos"
+            });
+        }
+        
+        if (!['trabajador', 'admin'].includes(userType)) {
+            return res.status(400).json({
+                status: "Error",
+                message: "userType debe ser 'trabajador' o 'admin'"
+            });
+        }
+        
+        const codeData = await generateRandomCode(userId, userType);
+        
+        res.status(200).json({
+            status: "Success",
+            message: "Código generado exitosamente",
+            data: {
+                code: codeData.code,
+                expiresAt: codeData.expiresAt,
+                expiresIn: codeData.expiresIn
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error en generateCodeAfterLogin:', error);
+        res.status(500).json({
+            status: "Error",
+            message: "Error interno del servidor",
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Endpoint para validar código aleatorio
+ */
+const validateCodeEndpoint = async (req, res) => {
+    const { code, userId, userType } = req.body;
+    
+    try {
+        if (!code || !userId || !userType) {
+            return res.status(400).json({
+                status: "Error",
+                message: "code, userId y userType son requeridos"
+            });
+        }
+        
+        const validation = await validateRandomCode(code, userId, userType);
+        
+        if (validation.valid) {
+            res.status(200).json({
+                status: "Success",
+                message: validation.message
+            });
+        } else {
+            res.status(400).json({
+                status: "Error",
+                message: validation.message
+            });
+        }
+        
+    } catch (error) {
+        console.error('Error en validateCodeEndpoint:', error);
+        res.status(500).json({
+            status: "Error",
+            message: "Error interno del servidor",
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Envía código OTP por email usando webhook de N8N
+ * @param {string} email - Email del destinatario
+ * @param {string} code - Código OTP
+ * @param {string} userName - Nombre del usuario
+ * @param {string} userType - Tipo de usuario
+ * @returns {Object} - Resultado del envío
+ */
+const sendOTPByEmail = async (email, code, userName, userType) => {
+    try {
+        const webhookUrl = process.env.N8N_WEBHOOK_URL_LOGIN;
+        
+        if (!webhookUrl) {
+            console.error('N8N_WEBHOOK_URL_LOGIN no está configurado en las variables de entorno');
+            return {
+                success: false,
+                message: "Configuración de webhook N8N no encontrada",
+                error: "N8N_WEBHOOK_URL no está definido en .env"
+            };
+        }
+        
+        const payload = {
+            email: email,
+            code: code,
+            userName: userName,
+            userType: userType,
+            expiresIn: 5, // 5 minutos
+            timestamp: new Date().toISOString()
+        };
+
+        const response = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Error del webhook N8N: ${response.status} ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        
+        return {
+            success: true,
+            message: "Código OTP enviado por email exitosamente",
+            n8nResponse: result
+        };
+
+    } catch (error) {
+        console.error('Error enviando OTP por email:', error);
+        return {
+            success: false,
+            message: "Error enviando código por email",
+            error: error.message
+        };
+    }
+};
+
+/**
+ * Genera código OTP y lo envía por email
+ * @param {string} userId - ID del usuario
+ * @param {string} userType - Tipo de usuario
+ * @param {string} email - Email del usuario
+ * @param {string} userName - Nombre del usuario
+ * @returns {Object} - Resultado de la operación
+ */
+const generateAndSendOTP = async (userId, userType, email, userName) => {
+    try {
+        // Generar el código
+        const codeData = await generateRandomCode(userId, userType);
+        
+        // Enviar por email
+        const emailResult = await sendOTPByEmail(email, codeData.code, userName, userType);
+        
+        if (emailResult.success) {
+            return {
+                success: true,
+                message: "Código OTP generado y enviado por email",
+                codeData: {
+                    code: codeData.code,
+                    expiresAt: codeData.expiresAt,
+                    expiresIn: codeData.expiresIn
+                },
+                emailSent: true
+            };
+        } else {
+            return {
+                success: false,
+                message: "Código generado pero error enviando email",
+                codeData: {
+                    code: codeData.code,
+                    expiresAt: codeData.expiresAt,
+                    expiresIn: codeData.expiresIn
+                },
+                emailSent: false,
+                emailError: emailResult.message
+            };
+        }
+        
+    } catch (error) {
+        console.error('Error en generateAndSendOTP:', error);
+        return {
+            success: false,
+            message: "Error generando y enviando OTP",
+            error: error.message
+        };
+    }
+};
+
+/**
+ * Endpoint para generar y enviar código OTP por email
+ */
+const generateAndSendOTPEndpoint = async (req, res) => {
+    const { userId, userType, email, userName } = req.body;
+    
+    try {
+        if (!userId || !userType || !email || !userName) {
+            return res.status(400).json({
+                status: "Error",
+                message: "userId, userType, email y userName son requeridos"
+            });
+        }
+        
+        if (!['trabajador', 'admin'].includes(userType)) {
+            return res.status(400).json({
+                status: "Error",
+                message: "userType debe ser 'trabajador' o 'admin'"
+            });
+        }
+        
+        const result = await generateAndSendOTP(userId, userType, email, userName);
+        
+        if (result.success) {
+            res.status(200).json({
+                status: "Success",
+                message: result.message,
+                data: result.codeData,
+                emailSent: result.emailSent
+            });
+        } else {
+            res.status(500).json({
+                status: "Error",
+                message: result.message,
+                error: result.error || result.emailError
+            });
+        }
+        
+    } catch (error) {
+        console.error('Error en generateAndSendOTPEndpoint:', error);
+        res.status(500).json({
+            status: "Error",
+            message: "Error interno del servidor",
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Verifica código OTP y completa el login
+ */
+const verifyOTPAndCompleteLogin = async (req, res) => {
+    const { code, userId, userType } = req.body;
+    
+    try {
+        if (!code || !userId || !userType) {
+            return res.status(400).json({
+                status: "Error",
+                message: "code, userId y userType son requeridos"
+            });
+        }
+        
+        if (!['trabajador', 'admin'].includes(userType)) {
+            return res.status(400).json({
+                status: "Error",
+                message: "userType debe ser 'trabajador' o 'admin'"
+            });
+        }
+        
+        // Validar el código
+        const validation = await validateRandomCode(code, userId, userType);
+        
+        if (!validation.valid) {
+            return res.status(400).json({
+                status: "Error",
+                message: validation.message
+            });
+        }
+        
+        // Obtener información del usuario
+        const db = await getDb();
+        let userInfo = null;
+        
+        if (userType === 'trabajador') {
+            userInfo = await db.collection('trabajadores').findOne({ _id: new ObjectId(userId) });
+        } else if (userType === 'admin') {
+            userInfo = await db.collection('administradores').findOne({ _id: new ObjectId(userId) });
+        }
+        
+        if (!userInfo) {
+            return res.status(404).json({
+                status: "Error",
+                message: "Usuario no encontrado"
+            });
+        }
+        
+        // Login completado exitosamente
+        res.status(200).json({
+            status: "Success",
+            message: "Código verificado correctamente. Login completado.",
+            user: {
+                id: userInfo._id,
+                nombre: userInfo.nombre,
+                correo: userInfo.correo,
+                role: userType,
+                loginCompleted: true
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error en verifyOTPAndCompleteLogin:', error);
+        res.status(500).json({
+            status: "Error",
+            message: "Error interno del servidor",
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Reenvía código OTP por email
+ */
+const resendOTPCode = async (req, res) => {
+    const { userId, userType } = req.body;
+    
+    try {
+        if (!userId || !userType) {
+            return res.status(400).json({
+                status: "Error",
+                message: "userId y userType son requeridos"
+            });
+        }
+        
+        if (!['trabajador', 'admin'].includes(userType)) {
+            return res.status(400).json({
+                status: "Error",
+                message: "userType debe ser 'trabajador' o 'admin'"
+            });
+        }
+        
+        // Obtener información del usuario
+        const db = await getDb();
+        let userInfo = null;
+        
+        if (userType === 'trabajador') {
+            userInfo = await db.collection('trabajadores').findOne({ _id: new ObjectId(userId) });
+        } else if (userType === 'admin') {
+            userInfo = await db.collection('administradores').findOne({ _id: new ObjectId(userId) });
+        }
+        
+        if (!userInfo) {
+            return res.status(404).json({
+                status: "Error",
+                message: "Usuario no encontrado"
+            });
+        }
+        
+        // Generar nuevo código y enviar por email
+        const result = await generateAndSendOTP(
+            userId, 
+            userType, 
+            userInfo.correo, 
+            userInfo.nombre || (userType === 'admin' ? 'Administrador' : 'Usuario')
+        );
+        
+        if (result.success) {
+            res.status(200).json({
+                status: "Success",
+                message: "Nuevo código OTP enviado por email",
+                emailSent: result.emailSent
+            });
+        } else {
+            res.status(500).json({
+                status: "Error",
+                message: result.message,
+                error: result.error || result.emailError
+            });
+        }
+        
+    } catch (error) {
+        console.error('Error en resendOTPCode:', error);
+        res.status(500).json({
+            status: "Error",
+            message: "Error interno del servidor",
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Endpoint para limpiar códigos expirados manualmente
+ */
+const cleanupCodesEndpoint = async (req, res) => {
+    try {
+        await cleanupExpiredCodes();
+        
+        res.status(200).json({
+            status: "Success",
+            message: "Códigos expirados limpiados exitosamente"
+        });
+        
+    } catch (error) {
+        console.error('Error en cleanupCodesEndpoint:', error);
+        res.status(500).json({
+            status: "Error",
+            message: "Error interno del servidor",
+            error: error.message
+        });
+    }
+};
+
 module.exports = {
     registertrabajador,
     loginTrabajador,
@@ -6085,6 +6643,20 @@ module.exports = {
     confirmPayment,
     getPaymentsDashboard,
     getInvoiceWithPaymentPlan,
-    editPaymentPlan
+    editPaymentPlan,
+    // FUNCIONES PARA CÓDIGOS ALEATORIOS
+    generateRandomCode,
+    validateRandomCode,
+    cleanupExpiredCodes,
+    generateCodeAfterLogin,
+    validateCodeEndpoint,
+    cleanupCodesEndpoint,
+    // FUNCIONES PARA ENVÍO DE OTP POR EMAIL
+    sendOTPByEmail,
+    generateAndSendOTP,
+    generateAndSendOTPEndpoint,
+    // FUNCIONES PARA VERIFICACIÓN DE OTP
+    verifyOTPAndCompleteLogin,
+    resendOTPCode
     
 };
