@@ -6318,19 +6318,55 @@ const sendOTPByEmail = async (email, code, userName, userType) => {
             timestamp: new Date().toISOString()
         };
 
+        console.log('Enviando OTP a webhook N8N:', webhookUrl);
+        console.log('Payload enviado:', JSON.stringify(payload, null, 2));
+
         const response = await fetch(webhookUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            timeout: 10000 // 10 segundos de timeout
+        });
+
+        console.log('Respuesta del webhook N8N:', {
+            status: response.status,
+            statusText: response.statusText,
+            headers: Object.fromEntries(response.headers.entries())
         });
 
         if (!response.ok) {
             throw new Error(`Error del webhook N8N: ${response.status} ${response.statusText}`);
         }
 
-        const result = await response.json();
+        // Verificar si hay contenido en la respuesta
+        const responseText = await response.text();
+        
+        if (!responseText || responseText.trim() === '') {
+            console.warn('Webhook N8N devolvió respuesta vacía, asumiendo éxito');
+            return {
+                success: true,
+                message: "Código OTP enviado por email exitosamente",
+                n8nResponse: { message: "Respuesta vacía del webhook" }
+            };
+        }
+
+        // Intentar parsear como JSON
+        let result;
+        try {
+            result = JSON.parse(responseText);
+        } catch (parseError) {
+            console.warn('Webhook N8N devolvió respuesta no JSON válida:', responseText);
+            return {
+                success: true,
+                message: "Código OTP enviado por email exitosamente",
+                n8nResponse: { 
+                    message: "Respuesta no JSON del webhook",
+                    rawResponse: responseText.substring(0, 200) // Primeros 200 caracteres
+                }
+            };
+        }
         
         return {
             success: true,
@@ -6605,6 +6641,70 @@ const resendOTPCode = async (req, res) => {
 };
 
 /**
+ * Endpoint para probar la conectividad con N8N
+ */
+const testN8NWebhook = async (req, res) => {
+    try {
+        const webhookUrl = process.env.N8N_WEBHOOK_URL_LOGIN;
+        
+        if (!webhookUrl) {
+            return res.status(400).json({
+                status: "Error",
+                message: "N8N_WEBHOOK_URL_LOGIN no está configurado"
+            });
+        }
+
+        const testPayload = {
+            email: "test@example.com",
+            code: "123456",
+            userName: "Usuario de Prueba",
+            userType: "trabajador",
+            expiresIn: 5,
+            timestamp: new Date().toISOString(),
+            test: true
+        };
+
+        console.log('Probando conectividad con N8N:', webhookUrl);
+        console.log('Payload de prueba:', JSON.stringify(testPayload, null, 2));
+
+        const response = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(testPayload),
+            timeout: 10000
+        });
+
+        const responseText = await response.text();
+        
+        res.status(200).json({
+            status: "Success",
+            message: "Prueba de conectividad completada",
+            webhookUrl,
+            responseStatus: response.status,
+            responseText: responseText.substring(0, 500), // Primeros 500 caracteres
+            isJson: (() => {
+                try {
+                    JSON.parse(responseText);
+                    return true;
+                } catch {
+                    return false;
+                }
+            })()
+        });
+        
+    } catch (error) {
+        console.error('Error probando N8N:', error);
+        res.status(500).json({
+            status: "Error",
+            message: "Error probando conectividad con N8N",
+            error: error.message
+        });
+    }
+};
+
+/**
  * Endpoint para limpiar códigos expirados manualmente
  */
 const cleanupCodesEndpoint = async (req, res) => {
@@ -6700,6 +6800,8 @@ module.exports = {
     generateAndSendOTPEndpoint,
     // FUNCIONES PARA VERIFICACIÓN DE OTP
     verifyOTPAndCompleteLogin,
-    resendOTPCode
+    resendOTPCode,
+    // FUNCIONES DE DIAGNÓSTICO
+    testN8NWebhook
     
 };

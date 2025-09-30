@@ -2,7 +2,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 const router = express.Router();
 const mongoose = require('mongoose');
-const { registertrabajador, loginTrabajador,logoutTrabajador,newProduct,getProducts,updateProduct,deleteProduct,assignProductToInventory,getInventoryProducts,updateInventoryProduct,deleteInventoryProduct,getProductsWithStock,createSale,checkAndReserveSaleCode,releaseSaleCode,getLastRegisteredSaleCode,getAllSales,getReportsData,registeradmin,loginadmin,getSpecificDayReport,getDashboardData,getUsers,createUser,updateUser,loginUser,exportReportPDF,deleteUser,searchCustomersapi,createClient,getClients,getClientById,updateClient,deleteClient,searchClients,createInvoice,getInvoices,getInvoiceById,updateInvoiceStatus,getInvoicesByClient,createPayment,getPaymentsByInvoice,getPaymentsByClient,getAccountStatus,getPortfolioReport,getOverdueInvoices,getPaymentAnalysis,createCategory,getCategories,updateCategory,deleteCategory,generateInvoicePDF,sendInvoiceByEmail,sendInvoiceToN8N,testN8NConnection,confirmPayment,getPaymentsDashboard,getInvoiceWithPaymentPlan,editPaymentPlan,generateCodeAfterLogin,validateCodeEndpoint,cleanupCodesEndpoint,sendOTPByEmail,generateAndSendOTP,generateAndSendOTPEndpoint,verifyOTPAndCompleteLogin,resendOTPCode} =require('./controllers/papeleriaControllers');
+const { registertrabajador, loginTrabajador,logoutTrabajador,newProduct,getProducts,updateProduct,deleteProduct,assignProductToInventory,getInventoryProducts,updateInventoryProduct,deleteInventoryProduct,getProductsWithStock,createSale,checkAndReserveSaleCode,releaseSaleCode,getLastRegisteredSaleCode,getAllSales,getReportsData,registeradmin,loginadmin,getSpecificDayReport,getDashboardData,getUsers,createUser,updateUser,loginUser,exportReportPDF,deleteUser,searchCustomersapi,createClient,getClients,getClientById,updateClient,deleteClient,searchClients,createInvoice,getInvoices,getInvoiceById,updateInvoiceStatus,getInvoicesByClient,createPayment,getPaymentsByInvoice,getPaymentsByClient,getAccountStatus,getPortfolioReport,getOverdueInvoices,getPaymentAnalysis,createCategory,getCategories,updateCategory,deleteCategory,generateInvoicePDF,sendInvoiceByEmail,sendInvoiceToN8N,testN8NConnection,confirmPayment,getPaymentsDashboard,getInvoiceWithPaymentPlan,editPaymentPlan,generateCodeAfterLogin,validateCodeEndpoint,cleanupCodesEndpoint,sendOTPByEmail,generateAndSendOTP,generateAndSendOTPEndpoint,verifyOTPAndCompleteLogin,resendOTPCode,testN8NWebhook} =require('./controllers/papeleriaControllers');
 
 dotenv.config({ path: './config.env' }); 
 
@@ -103,6 +103,9 @@ mongoose.connect(process.env.MONGO_URI)
    // Rutas para verificación de OTP
    router.post('/verify-otp', verifyOTPAndCompleteLogin);
    router.post('/resend-otp', resendOTPCode);
+   
+   // Rutas de diagnóstico
+   router.get('/test-n8n-webhook', testN8NWebhook);
 
 
 
