@@ -6080,6 +6080,22 @@ const generateRandomCode = async (userId, userType) => {
         // Calcular fecha de expiración (5 minutos desde ahora)
         const expirationTime = new Date(Date.now() + 5 * 60 * 1000);
         
+        // Invalidar códigos anteriores del mismo usuario (marcar como usados)
+        await db.collection('random_codes').updateMany(
+            { 
+                userId, 
+                userType, 
+                isUsed: false 
+            },
+            { 
+                $set: { 
+                    isUsed: true, 
+                    usedAt: new Date(),
+                    invalidatedBy: 'new_code_generated'
+                } 
+            }
+        );
+        
         // Crear documento del código
         const codeDocument = {
             code,

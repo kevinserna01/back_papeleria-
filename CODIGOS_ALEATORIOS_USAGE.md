@@ -338,10 +338,25 @@ const resendResponse = await fetch('/resend-otp', {
 const { emailSent } = await resendResponse.json();
 if (emailSent) {
   console.log('Nuevo código OTP enviado');
+  console.log('Código anterior invalidado automáticamente');
 } else {
   console.log('Error reenviando código');
 }
 ```
+
+### Comportamiento del Reenvío
+
+**Cuando se reenvía un código:**
+1. **Se invalida automáticamente** el código anterior del mismo usuario
+2. **Se genera un nuevo código** con nueva expiración (5 minutos)
+3. **Se envía por email** el nuevo código
+4. **El código anterior ya no es válido** aunque no haya expirado
+
+**Ventajas de seguridad:**
+- ✅ Previene el uso de códigos antiguos
+- ✅ Evita confusión con múltiples códigos activos
+- ✅ Garantiza que solo el último código enviado sea válido
+- ✅ Mejora la experiencia del usuario
 
 ### Ejemplo: Envío manual de código OTP
 ```javascript
@@ -369,6 +384,7 @@ if (emailSent) {
 
 - **Un solo uso**: Cada código solo puede ser usado una vez
 - **Expiración temporal**: Los códigos expiran en 5 minutos
+- **Invalidación automática**: Al generar un nuevo código, se invalidan automáticamente todos los códigos anteriores del mismo usuario
 - **Limpieza automática**: Códigos expirados se eliminan de la base de datos
 - **Validación de usuario**: Los códigos están vinculados a un usuario específico
 - **Tipo de usuario**: Los códigos están vinculados al tipo de usuario (trabajador/admin)
