@@ -6105,14 +6105,34 @@ const suggestPaymentAmounts = async (req, res) => {
 
     // Calcular monto total disponible para distribuir
     const montoTotal = factura.total;
-    const montoAsignado = abonosExistentes.reduce((sum, abono) => sum + (Number(abono.monto) || 0), 0);
+    
+    // Filtrar solo abonos con monto > 0 (los que realmente están asignados)
+    const abonosAsignados = abonosExistentes.filter(abono => Number(abono.monto) > 0);
+    const montoAsignado = abonosAsignados.reduce((sum, abono) => sum + Number(abono.monto), 0);
     const montoDisponible = montoTotal - montoAsignado;
-    const abonosRestantes = numeroAbonos - abonosExistentes.length;
+    const abonosRestantes = numeroAbonos - abonosAsignados.length;
+
+    console.log('Debug sugerencias:', {
+      facturaId,
+      numeroAbonos,
+      abonosExistentes: abonosExistentes.length,
+      abonosAsignados: abonosAsignados.length,
+      montoTotal,
+      montoAsignado,
+      montoDisponible,
+      abonosRestantes
+    });
 
     if (abonosRestantes <= 0) {
       return res.status(400).json({
         status: "Error",
-        message: "No hay abonos restantes para sugerir"
+        message: "No hay abonos restantes para sugerir",
+        debug: {
+          abonosExistentes: abonosExistentes.length,
+          abonosAsignados: abonosAsignados.length,
+          numeroAbonos,
+          abonosRestantes
+        }
       });
     }
 
@@ -6138,11 +6158,11 @@ const suggestPaymentAmounts = async (req, res) => {
       }
 
       sugerencias.push({
-        numero: abonosExistentes.length + i + 1,
+        numero: abonosAsignados.length + i + 1,
         monto: monto,
         fechaProgramada: new Date(Date.now() + (i + 1) * 30 * 24 * 60 * 60 * 1000), // 30 días entre abonos
         estado: 'pendiente',
-        observaciones: `Abono ${abonosExistentes.length + i + 1}`,
+        observaciones: `Abono ${abonosAsignados.length + i + 1}`,
         esFlexible: true
       });
     }
@@ -6156,6 +6176,7 @@ const suggestPaymentAmounts = async (req, res) => {
         montoAsignado: montoAsignado,
         montoDisponible: montoDisponible,
         abonosExistentes: abonosExistentes.length,
+        abonosAsignados: abonosAsignados.length,
         abonosRestantes: abonosRestantes,
         sugerencias: sugerencias,
         totalSugerido: sugerencias.reduce((sum, abono) => sum + abono.monto, 0),
