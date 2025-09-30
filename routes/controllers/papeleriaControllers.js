@@ -6612,21 +6612,29 @@ const resendOTPCode = async (req, res) => {
         const result = await generateAndSendOTP(
             userId, 
             userType, 
-            userInfo.correo, 
-            userInfo.nombre || (userType === 'admin' ? 'Administrador' : 'Usuario')
+            userInfo.email || userInfo.correo, 
+            userInfo.name || userInfo.nombre || (userType === 'admin' ? 'Administrador' : 'Usuario')
         );
         
         if (result.success) {
             res.status(200).json({
                 status: "Success",
                 message: "Nuevo código OTP enviado por email",
-                emailSent: result.emailSent
+                emailSent: result.emailSent,
+                email: userInfo.email || userInfo.correo,
+                user: {
+                    id: userInfo._id,
+                    name: userInfo.name || userInfo.nombre,
+                    email: userInfo.email || userInfo.correo,
+                    role: userType
+                }
             });
         } else {
             res.status(500).json({
                 status: "Error",
                 message: result.message,
-                error: result.error || result.emailError
+                error: result.error || result.emailError,
+                email: userInfo.email || userInfo.correo
             });
         }
         

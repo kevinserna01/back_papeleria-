@@ -143,7 +143,24 @@ POST /resend-otp
 {
   "status": "Success",
   "message": "Nuevo código OTP enviado por email",
-  "emailSent": true
+  "emailSent": true,
+  "email": "usuario@example.com",
+  "user": {
+    "id": "64f8a1b2c3d4e5f6a7b8c9d0",
+    "name": "Juan Pérez",
+    "email": "usuario@example.com",
+    "role": "trabajador"
+  }
+}
+```
+
+**Respuesta con error:**
+```json
+{
+  "status": "Error",
+  "message": "Error enviando código por email",
+  "error": "Error del webhook N8N: 500 Internal Server Error",
+  "email": "usuario@example.com"
 }
 ```
 
