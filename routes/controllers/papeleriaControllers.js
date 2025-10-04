@@ -3908,13 +3908,28 @@ const createClient = async (req, res) => {
 
     await db.collection('clientes').insertOne(newClient);
 
+    // Enviar email de bienvenida al cliente
+    try {
+      const emailResult = await sendClientWelcomeEmail(email, nombre, tipoCliente);
+      console.log('Resultado del envío de email de bienvenida:', emailResult);
+      
+      if (!emailResult.success) {
+        console.warn('No se pudo enviar el email de bienvenida:', emailResult.message);
+        // No fallar la creación si el email falla, solo loguear el warning
+      }
+    } catch (emailError) {
+      console.error('Error enviando email de bienvenida:', emailError);
+      // No fallar la creación si el email falla, solo loguear el error
+    }
+
     return res.status(201).json({
       status: "Success",
       message: "Cliente creado correctamente.",
       data: {
         id: newClient._id,
         ...newClient
-      }
+      },
+      welcomeEmailSent: true
     });
 
   } catch (error) {
@@ -6634,6 +6649,94 @@ const sendCredentialsByEmail = async (email, userName, userType, password) => {
     }
 };
 
+const sendClientWelcomeEmail = async (email, clientName, clientType) => {
+    try {
+        const webhookUrl = process.env.N8N_WEBHOOK_URL_BIENVENIDA_CLIENTES;
+        
+        if (!webhookUrl) {
+            console.error('N8N_WEBHOOK_URL_BIENVENIDA no está configurado en las variables de entorno');
+            return {
+                success: false,
+                message: "Configuración de webhook N8N no encontrada",
+                error: "N8N_WEBHOOK_URL_BIENVENIDA no está definido en .env"
+            };
+        }
+        
+        const payload = {
+            email: email,
+            clientName: clientName,
+            clientType: clientType,
+            timestamp: new Date().toISOString(),
+            subject: `¡Bienvenido a nuestra papelería! - ${clientName}`,
+            message: `¡Hola ${clientName}!\n\n¡Bienvenido a nuestra papelería!\n\nNos complace darte la bienvenida como nuestro nuevo cliente. Estamos aquí para brindarte el mejor servicio y los productos de más alta calidad.\n\nTipo de cliente: ${clientType === 'individual' ? 'Individual' : 'Empresarial'}\n\n¿Qué puedes hacer ahora?\n- Explorar nuestro catálogo de productos\n- Realizar pedidos personalizados\n- Consultar nuestros servicios\n- Contactarnos para cualquier consulta\n\n¡Esperamos brindarte una excelente experiencia de compra!\n\nSaludos cordiales,\nEquipo de Papelería`
+        };
+
+        console.log('Enviando email de bienvenida a cliente:', webhookUrl);
+        console.log('Payload enviado:', JSON.stringify(payload, null, 2));
+
+        const response = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+            timeout: 10000 // 10 segundos de timeout
+        });
+
+        console.log('Respuesta del webhook N8N:', {
+            status: response.status,
+            statusText: response.statusText,
+            headers: Object.fromEntries(response.headers.entries())
+        });
+
+        if (!response.ok) {
+            throw new Error(`Error del webhook N8N: ${response.status} ${response.statusText}`);
+        }
+
+        // Verificar si hay contenido en la respuesta
+        const responseText = await response.text();
+        
+        if (!responseText || responseText.trim() === '') {
+            console.warn('Webhook N8N devolvió respuesta vacía, asumiendo éxito');
+            return {
+                success: true,
+                message: "Email de bienvenida enviado exitosamente",
+                n8nResponse: { message: "Respuesta vacía del webhook" }
+            };
+        }
+
+        // Intentar parsear como JSON
+        let result;
+        try {
+            result = JSON.parse(responseText);
+        } catch (parseError) {
+            console.warn('Webhook N8N devolvió respuesta no JSON válida:', responseText);
+            return {
+                success: true,
+                message: "Email de bienvenida enviado exitosamente",
+                n8nResponse: { 
+                    message: "Respuesta no JSON del webhook",
+                    rawResponse: responseText.substring(0, 200) // Primeros 200 caracteres
+                }
+            };
+        }
+        
+        return {
+            success: true,
+            message: "Email de bienvenida enviado exitosamente",
+            n8nResponse: result
+        };
+
+    } catch (error) {
+        console.error('Error enviando email de bienvenida:', error);
+        return {
+            success: false,
+            message: "Error enviando email de bienvenida",
+            error: error.message
+        };
+    }
+};
+
 const sendOTPByEmail = async (email, code, userName, userType) => {
     try {
         const webhookUrl = process.env.N8N_WEBHOOK_URL_LOGIN;
@@ -7222,7 +7325,9 @@ module.exports = {
     suggestPaymentAmounts,
     // FUNCIONES PARA ENVÍO DE CREDENCIALES
     sendCredentialsByEmail,
-    sendCredentialsByEmailWrapper
+    sendCredentialsByEmailWrapper,
+    // FUNCIONES PARA ENVÍO DE EMAILS DE BIENVENIDA
+    sendClientWelcomeEmail
     
 };
 

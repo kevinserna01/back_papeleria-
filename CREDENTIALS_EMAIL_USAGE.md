@@ -32,7 +32,15 @@ Esta funcionalidad permite enviar automáticamente las credenciales de acceso (e
 - **Campos requeridos**: `name`, `email`, `password`, `role`
 - **Webhook**: Usa `N8N_WEBHOOK_URL_BIENVENIDA`
 
-### 5. Envío Manual de Credenciales
+### 5. Creación de Clientes
+- **Endpoint**: `POST /clientes`
+- **Función**: `createClient`
+- **Funcionalidad**: Después de crear exitosamente un cliente, se envía un email de bienvenida
+- **Campos requeridos**: `tipoIdentificacion`, `numeroIdentificacion`, `nombre`, `email`, `telefono`
+- **Campos opcionales**: `departamento`, `ciudad`, `ubicacionLocal`, `tipoCliente`, `descuentoPersonalizado`
+- **Webhook**: Usa `N8N_WEBHOOK_URL_BIENVENIDA`
+
+### 6. Envío Manual de Credenciales
 - **Endpoint**: `POST /send-credentials-email`
 - **Función**: `sendCredentialsByEmailWrapper`
 - **Funcionalidad**: Permite enviar credenciales por email de forma manual
@@ -55,6 +63,7 @@ N8N_WEBHOOK_URL_LOGIN=http://localhost:5678/webhook/send-otp
 
 ## Payload Enviado a N8N
 
+### Para Credenciales de Usuarios
 ```json
 {
   "email": "usuario@ejemplo.com",
@@ -64,6 +73,18 @@ N8N_WEBHOOK_URL_LOGIN=http://localhost:5678/webhook/send-otp
   "timestamp": "2024-01-15T10:30:00.000Z",
   "subject": "Credenciales de acceso - Trabajador",
   "message": "Hola Nombre del Usuario,\n\nTus credenciales de acceso han sido creadas:\n\nEmail: usuario@ejemplo.com\nContraseña: contraseña123\nTipo de usuario: Trabajador\n\nPor favor, guarda esta información de forma segura.\n\nSaludos,\nSistema de Papelería"
+}
+```
+
+### Para Email de Bienvenida de Clientes
+```json
+{
+  "email": "cliente@ejemplo.com",
+  "clientName": "María García",
+  "clientType": "individual",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "subject": "¡Bienvenido a nuestra papelería! - María García",
+  "message": "¡Hola María García!\n\n¡Bienvenido a nuestra papelería!\n\nNos complace darte la bienvenida como nuestro nuevo cliente. Estamos aquí para brindarte el mejor servicio y los productos de más alta calidad.\n\nTipo de cliente: Individual\n\n¿Qué puedes hacer ahora?\n- Explorar nuestro catálogo de productos\n- Realizar pedidos personalizados\n- Consultar nuestros servicios\n- Contactarnos para cualquier consulta\n\n¡Esperamos brindarte una excelente experiencia de compra!\n\nSaludos cordiales,\nEquipo de Papelería"
 }
 ```
 
@@ -160,6 +181,22 @@ curl -X POST http://localhost:4000/createUserapi \
     "email": "juan@ejemplo.com",
     "password": "password123",
     "role": "user"
+  }'
+```
+
+### Probar Creación de Cliente
+```bash
+curl -X POST http://localhost:4000/clientes \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tipoIdentificacion": "CC",
+    "numeroIdentificacion": "12345678",
+    "nombre": "María García",
+    "email": "maria@ejemplo.com",
+    "telefono": "3001234567",
+    "departamento": "Cundinamarca",
+    "ciudad": "Bogotá",
+    "tipoCliente": "individual"
   }'
 ```
 
