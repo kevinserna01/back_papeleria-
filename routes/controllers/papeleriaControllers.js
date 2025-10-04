@@ -6532,7 +6532,7 @@ const validateCodeEndpoint = async (req, res) => {
  */
 const sendCredentialsByEmail = async (email, userName, userType, password) => {
     try {
-        const webhookUrl = process.env.N8N_WEBHOOK_URL_CREDENTIALS || process.env.N8N_WEBHOOK_URL_LOGIN;
+        const webhookUrl = process.env.N8N_WEBHOOK_URL_BIENVENIDA;
         
         if (!webhookUrl) {
             console.error('N8N_WEBHOOK_URL_CREDENTIALS no está configurado en las variables de entorno');
