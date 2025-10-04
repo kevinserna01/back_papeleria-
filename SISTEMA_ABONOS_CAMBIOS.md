@@ -73,6 +73,170 @@ Este documento describe específicamente las mejoras implementadas en el sistema
 - **Flexibilidad**: Los abonos sugeridos son marcados como flexibles
 - **Filtrado Inteligente**: Solo considera abonos con monto > 0 como existentes
 
+### Manejo Dinámico de Abonos Variables
+
+El sistema ahora maneja dinámicamente abonos con montos variables, recalculando automáticamente los abonos restantes:
+
+```javascript
+// Ejemplo 1: Abonos iniciales
+{
+  "facturaId": "68db4ac6a52364fa24ceea0a",
+  "numeroAbonos": 4,
+  "abonosExistentes": [
+    { "numero": 1, "monto": 10000 },  // Abono asignado
+    { "numero": 2, "monto": 0 },      // Abono pendiente
+    { "numero": 3, "monto": 0 },      // Abono pendiente
+    { "numero": 4, "monto": 0 }       // Abono pendiente
+  ]
+}
+
+// Ejemplo 2: Después de asignar montos parciales
+{
+  "facturaId": "68db4ac6a52364fa24ceea0a",
+  "numeroAbonos": 4,
+  "abonosExistentes": [
+    { "numero": 1, "monto": 250000 }, // Abono asignado
+    { "numero": 2, "monto": 100000 }, // Abono asignado
+    { "numero": 3, "monto": 0 },      // Abono pendiente
+    { "numero": 4, "monto": 0 }       // Abono pendiente
+  ]
+}
+```
+
+**Lógica Dinámica Avanzada:**
+- **Separación por Estado**: Distingue entre abonos pagados (fijos) y pendientes (modificables)
+- **Cálculo Inteligente**: Suma abonos pagados + abonos pendientes con monto para calcular el total asignado
+- **Sugerencias Inteligentes**: 
+  - Abonos pagados: No se modifican (fijos)
+  - Abonos pendientes sin monto: Se sugieren nuevos montos
+  - Abonos pendientes con monto: Se recalculan según el monto restante
+- **Recálculo Automático**: Recalcula el monto disponible basándose en el total de la factura
+- **Flexibilidad Total**: Permite cualquier combinación de estados y montos
+
+### Casos de Uso Reales
+
+#### Caso 1: Factura de $400,000 con primer abono de $250,000
+```javascript
+// Request
+{
+  "facturaId": "68db4ac6a52364fa24ceea0a",
+  "numeroAbonos": 3,
+  "abonosExistentes": [
+    { "numero": 1, "monto": 250000 }, // Abono asignado
+    { "numero": 2, "monto": 0 },      // Pendiente
+    { "numero": 3, "monto": 0 }       // Pendiente
+  ]
+}
+
+// Response
+{
+  "data": {
+    "totalFactura": 400000,
+    "montoAsignado": 250000,
+    "montoDisponible": 150000,
+    "abonosPendientes": 2,
+    "sugerencias": [
+      { "numero": 2, "monto": 75000 },
+      { "numero": 3, "monto": 75000 }
+    ]
+  }
+}
+```
+
+#### Caso 2: Después de agregar $100,000 al segundo abono
+```javascript
+// Request
+{
+  "facturaId": "68db4ac6a52364fa24ceea0a",
+  "numeroAbonos": 3,
+  "abonosExistentes": [
+    { "numero": 1, "monto": 250000 }, // Abono asignado
+    { "numero": 2, "monto": 100000 }, // Abono asignado
+    { "numero": 3, "monto": 0 }       // Pendiente
+  ]
+}
+
+// Response
+{
+  "data": {
+    "totalFactura": 400000,
+    "montoAsignado": 350000,
+    "montoDisponible": 50000,
+    "abonosPendientes": 1,
+    "sugerencias": [
+      { "numero": 3, "monto": 50000 }
+    ]
+  }
+}
+```
+
+#### Caso 3: Con abonos pagados (fijos) y pendientes (modificables)
+```javascript
+// Request
+{
+  "facturaId": "68db4ac6a52364fa24ceea0a",
+  "numeroAbonos": 4,
+  "abonosExistentes": [
+    { "numero": 1, "monto": 200000, "estado": "pagado" },    // Fijo - no modificable
+    { "numero": 2, "monto": 50000, "estado": "pendiente" },  // Modificable - se recalcula
+    { "numero": 3, "monto": 0, "estado": "pendiente" },      // Modificable - nueva sugerencia
+    { "numero": 4, "monto": 0, "estado": "pendiente" }       // Modificable - nueva sugerencia
+  ]
+}
+
+// Response
+{
+  "data": {
+    "totalFactura": 400000,
+    "montoAbonosPagados": 200000,
+    "montoAbonosPendientesAsignados": 50000,
+    "montoAsignado": 250000,
+    "montoDisponible": 150000,
+    "abonosPagados": 1,
+    "abonosPendientes": 3,
+    "abonosParaSugerir": 3,
+    "sugerencias": [
+      { 
+        "numero": 1, 
+        "monto": 200000, 
+        "estado": "pagado", 
+        "puedeModificar": false,
+        "observaciones": "Abono 1 (pagado - no modificable)"
+      },
+      { 
+        "numero": 2, 
+        "monto": 50000, 
+        "montoAnterior": 50000,
+        "esRecalculo": true,
+        "estado": "pendiente", 
+        "puedeModificar": true,
+        "observaciones": "Abono 2 (recalculado)"
+      },
+      { 
+        "numero": 3, 
+        "monto": 50000, 
+        "estado": "pendiente", 
+        "puedeModificar": true,
+        "observaciones": "Abono 3"
+      },
+      { 
+        "numero": 4, 
+        "monto": 50000, 
+        "estado": "pendiente", 
+        "puedeModificar": true,
+        "observaciones": "Abono 4"
+      }
+    ],
+    "resumen": {
+      "abonosFijos": 1,
+      "abonosModificables": 3,
+      "abonosNuevos": 2,
+      "abonosRecalculados": 1
+    }
+  }
+}
+```
+
 ## 🐛 Corrección de Bug: Total Pagado
 
 ### Problema Identificado

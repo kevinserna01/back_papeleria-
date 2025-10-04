@@ -15,6 +15,9 @@ SMTP_FROM=noreply@papeleria.com
 # Configuración N8N para Envío de Códigos OTP
 N8N_WEBHOOK_URL_LOGIN=http://localhost:5678/webhook/send-otp
 
+# Configuración N8N para Envío de Credenciales (opcional, usa LOGIN si no está definido)
+N8N_WEBHOOK_URL_CREDENTIALS=http://localhost:5678/webhook/send-credentials
+
 # URL Base del Backend (opcional)
 BASE_URL=https://back-papeleria-two.vercel.app
 

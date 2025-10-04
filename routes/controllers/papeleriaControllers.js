@@ -35,7 +35,26 @@ const registertrabajador = async (req, res) => {
         };
   
         await db.collection('trabajadores').insertOne(newUser);
-        res.status(201).json({ status: "Éxito", message: "Usuario registrado correctamente" });
+        
+        // Enviar credenciales por email
+        try {
+            const emailResult = await sendCredentialsByEmail(correo, nombre, 'trabajador', contraseña);
+            console.log('Resultado del envío de credenciales:', emailResult);
+            
+            if (!emailResult.success) {
+                console.warn('No se pudieron enviar las credenciales por email:', emailResult.message);
+                // No fallar el registro si el email falla, solo loguear el warning
+            }
+        } catch (emailError) {
+            console.error('Error enviando credenciales por email:', emailError);
+            // No fallar el registro si el email falla, solo loguear el error
+        }
+        
+        res.status(201).json({ 
+            status: "Éxito", 
+            message: "Usuario registrado correctamente",
+            emailSent: true
+        });
     } catch (error) {
         console.error('Error al registrar el usuario:', error);
         res.status(500).json({ status: "Error", message: "Internal Server Error" });
@@ -2099,7 +2118,7 @@ const registeradmin = async (req, res) => {
   try {
     const db = await getDb();
 
-    const { correo, contraseña } = req.body;
+    const { correo, contraseña, nombre } = req.body;
 
     if (!correo || !contraseña) {
       return res.status(400).json({
@@ -2122,15 +2141,31 @@ const registeradmin = async (req, res) => {
       correo,
       password: hashedPassword,
       role: 'admin',
+      nombre: nombre || 'Administrador', // Usar nombre proporcionado o 'Administrador' por defecto
       creado: moment().tz("America/Bogota").format('YYYY-MM-DD HH:mm:ss')
     };
 
     await db.collection('administradores').insertOne(newAdmin);
 
+    // Enviar credenciales por email
+    try {
+      const emailResult = await sendCredentialsByEmail(correo, newAdmin.nombre, 'admin', contraseña);
+      console.log('Resultado del envío de credenciales:', emailResult);
+      
+      if (!emailResult.success) {
+        console.warn('No se pudieron enviar las credenciales por email:', emailResult.message);
+        // No fallar el registro si el email falla, solo loguear el warning
+      }
+    } catch (emailError) {
+      console.error('Error enviando credenciales por email:', emailError);
+      // No fallar el registro si el email falla, solo loguear el error
+    }
+
     return res.status(201).json({
       status: "Success",
       message: "Administrador creado correctamente.",
-      data: newAdmin
+      data: newAdmin,
+      emailSent: true
     });
 
   } catch (error) {
@@ -6106,32 +6141,57 @@ const suggestPaymentAmounts = async (req, res) => {
     // Calcular monto total disponible para distribuir
     const montoTotal = factura.total;
     
-    // Filtrar solo abonos con monto > 0 (los que realmente están asignados)
-    const abonosAsignados = abonosExistentes.filter(abono => Number(abono.monto) > 0);
-    const montoAsignado = abonosAsignados.reduce((sum, abono) => sum + Number(abono.monto), 0);
+    // Separar abonos por estado
+    const abonosPagados = abonosExistentes.filter(abono => abono.estado === 'pagado');
+    const abonosPendientes = abonosExistentes.filter(abono => abono.estado === 'pendiente' || !abono.estado);
+    
+    // Calcular monto total asignado (solo abonos pagados + abonos pendientes con monto > 0)
+    const montoAbonosPagados = abonosPagados.reduce((sum, abono) => sum + (Number(abono.monto) || 0), 0);
+    const montoAbonosPendientesAsignados = abonosPendientes.reduce((sum, abono) => sum + (Number(abono.monto) || 0), 0);
+    const montoAsignado = montoAbonosPagados + montoAbonosPendientesAsignados;
     const montoDisponible = montoTotal - montoAsignado;
-    const abonosRestantes = numeroAbonos - abonosAsignados.length;
+    
+    // Contar abonos que necesitan sugerencias (pendientes con monto 0 o pendientes que se pueden recalcular)
+    const abonosParaSugerir = abonosPendientes.filter(abono => {
+      // Si no tiene monto asignado, necesita sugerencia
+      if (Number(abono.monto) === 0) return true;
+      // Si tiene monto pero es pendiente, se puede recalcular
+      return true;
+    });
+    const abonosRestantes = abonosParaSugerir.length;
 
     console.log('Debug sugerencias:', {
       facturaId,
       numeroAbonos,
       abonosExistentes: abonosExistentes.length,
-      abonosAsignados: abonosAsignados.length,
+      abonosPagados: abonosPagados.length,
+      abonosPendientes: abonosPendientes.length,
+      abonosParaSugerir: abonosParaSugerir.length,
       montoTotal,
+      montoAbonosPagados,
+      montoAbonosPendientesAsignados,
       montoAsignado,
       montoDisponible,
-      abonosRestantes
+      abonosRestantes,
+      abonosExistentesDetalle: abonosExistentes.map(a => ({ 
+        numero: a.numero, 
+        monto: a.monto, 
+        estado: a.estado || 'pendiente',
+        puedeModificar: a.estado !== 'pagado'
+      }))
     });
 
     if (abonosRestantes <= 0) {
       return res.status(400).json({
         status: "Error",
-        message: "No hay abonos restantes para sugerir",
+        message: "No hay abonos pendientes para sugerir (todos los abonos ya tienen montos asignados)",
         debug: {
           abonosExistentes: abonosExistentes.length,
-          abonosAsignados: abonosAsignados.length,
+          abonosPendientes: abonosPendientes.length,
           numeroAbonos,
-          abonosRestantes
+          abonosRestantes,
+          montoAsignado,
+          montoDisponible
         }
       });
     }
@@ -6147,25 +6207,58 @@ const suggestPaymentAmounts = async (req, res) => {
     const montoBase = Math.floor(montoDisponible / abonosRestantes);
     const residuo = montoDisponible - (montoBase * abonosRestantes);
 
-    // Generar sugerencias
+    // Generar sugerencias para abonos pendientes (con o sin monto asignado)
     const sugerencias = [];
-    for (let i = 0; i < abonosRestantes; i++) {
-      let monto = montoBase;
+    let indiceSugerencia = 0;
+    
+    for (let i = 0; i < abonosExistentes.length; i++) {
+      const abono = abonosExistentes[i];
       
-      // Agregar el residuo al último abono
-      if (i === abonosRestantes - 1) {
-        monto += residuo;
-      }
+      // Solo sugerir para abonos pendientes (no pagados)
+      if (abono.estado !== 'pagado') {
+        let monto = montoBase;
+        
+        // Agregar el residuo al último abono pendiente
+        if (indiceSugerencia === abonosRestantes - 1) {
+          monto += residuo;
+        }
 
-      sugerencias.push({
-        numero: abonosAsignados.length + i + 1,
-        monto: monto,
-        fechaProgramada: new Date(Date.now() + (i + 1) * 30 * 24 * 60 * 60 * 1000), // 30 días entre abonos
-        estado: 'pendiente',
-        observaciones: `Abono ${abonosAsignados.length + i + 1}`,
-        esFlexible: true
-      });
+        // Determinar si es una sugerencia nueva o recálculo
+        const esRecalculo = Number(abono.monto) > 0;
+        const montoAnterior = Number(abono.monto) || 0;
+
+        sugerencias.push({
+          numero: abono.numero,
+          monto: monto,
+          montoAnterior: esRecalculo ? montoAnterior : null,
+          esRecalculo: esRecalculo,
+          fechaProgramada: abono.fechaProgramada || new Date(Date.now() + (indiceSugerencia + 1) * 30 * 24 * 60 * 60 * 1000),
+          estado: 'pendiente',
+          observaciones: esRecalculo ? `Abono ${abono.numero} (recalculado)` : `Abono ${abono.numero}`,
+          esFlexible: true,
+          puedeModificar: true
+        });
+        
+        indiceSugerencia++;
+      } else {
+        // Abono pagado - no se puede modificar
+        sugerencias.push({
+          numero: abono.numero,
+          monto: abono.monto,
+          montoAnterior: null,
+          esRecalculo: false,
+          fechaProgramada: abono.fechaProgramada,
+          estado: 'pagado',
+          observaciones: `Abono ${abono.numero} (pagado - no modificable)`,
+          esFlexible: false,
+          puedeModificar: false
+        });
+      }
     }
+
+    // Calcular totales para sugerencias modificables
+    const sugerenciasModificables = sugerencias.filter(s => s.puedeModificar);
+    const totalSugerido = sugerenciasModificables.reduce((sum, abono) => sum + abono.monto, 0);
 
     return res.status(200).json({
       status: "Success",
@@ -6173,14 +6266,23 @@ const suggestPaymentAmounts = async (req, res) => {
       data: {
         facturaId: facturaId,
         totalFactura: montoTotal,
+        montoAbonosPagados: montoAbonosPagados,
+        montoAbonosPendientesAsignados: montoAbonosPendientesAsignados,
         montoAsignado: montoAsignado,
         montoDisponible: montoDisponible,
         abonosExistentes: abonosExistentes.length,
-        abonosAsignados: abonosAsignados.length,
-        abonosRestantes: abonosRestantes,
+        abonosPagados: abonosPagados.length,
+        abonosPendientes: abonosPendientes.length,
+        abonosParaSugerir: abonosParaSugerir.length,
         sugerencias: sugerencias,
-        totalSugerido: sugerencias.reduce((sum, abono) => sum + abono.monto, 0),
-        diferencia: montoDisponible - sugerencias.reduce((sum, abono) => sum + abono.monto, 0)
+        totalSugerido: totalSugerido,
+        diferencia: montoDisponible - totalSugerido,
+        resumen: {
+          abonosFijos: abonosPagados.length,
+          abonosModificables: sugerenciasModificables.length,
+          abonosNuevos: sugerenciasModificables.filter(s => !s.esRecalculo).length,
+          abonosRecalculados: sugerenciasModificables.filter(s => s.esRecalculo).length
+        }
       }
     });
 
@@ -6428,6 +6530,95 @@ const validateCodeEndpoint = async (req, res) => {
  * @param {string} userType - Tipo de usuario
  * @returns {Object} - Resultado del envío
  */
+const sendCredentialsByEmail = async (email, userName, userType, password) => {
+    try {
+        const webhookUrl = process.env.N8N_WEBHOOK_URL_CREDENTIALS || process.env.N8N_WEBHOOK_URL_LOGIN;
+        
+        if (!webhookUrl) {
+            console.error('N8N_WEBHOOK_URL_CREDENTIALS no está configurado en las variables de entorno');
+            return {
+                success: false,
+                message: "Configuración de webhook N8N no encontrada",
+                error: "N8N_WEBHOOK_URL_CREDENTIALS no está definido en .env"
+            };
+        }
+        
+        const payload = {
+            email: email,
+            userName: userName,
+            userType: userType,
+            password: password,
+            timestamp: new Date().toISOString(),
+            subject: `Credenciales de acceso - ${userType === 'admin' ? 'Administrador' : 'Trabajador'}`,
+            message: `Hola ${userName},\n\nTus credenciales de acceso han sido creadas:\n\nEmail: ${email}\nContraseña: ${password}\nTipo de usuario: ${userType === 'admin' ? 'Administrador' : 'Trabajador'}\n\nPor favor, guarda esta información de forma segura.\n\nSaludos,\nSistema de Papelería`
+        };
+
+        console.log('Enviando credenciales a webhook N8N:', webhookUrl);
+        console.log('Payload enviado:', JSON.stringify(payload, null, 2));
+
+        const response = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+            timeout: 10000 // 10 segundos de timeout
+        });
+
+        console.log('Respuesta del webhook N8N:', {
+            status: response.status,
+            statusText: response.statusText,
+            headers: Object.fromEntries(response.headers.entries())
+        });
+
+        if (!response.ok) {
+            throw new Error(`Error del webhook N8N: ${response.status} ${response.statusText}`);
+        }
+
+        // Verificar si hay contenido en la respuesta
+        const responseText = await response.text();
+        
+        if (!responseText || responseText.trim() === '') {
+            console.warn('Webhook N8N devolvió respuesta vacía, asumiendo éxito');
+            return {
+                success: true,
+                message: "Credenciales enviadas por email exitosamente",
+                n8nResponse: { message: "Respuesta vacía del webhook" }
+            };
+        }
+
+        // Intentar parsear como JSON
+        let result;
+        try {
+            result = JSON.parse(responseText);
+        } catch (parseError) {
+            console.warn('Webhook N8N devolvió respuesta no JSON válida:', responseText);
+            return {
+                success: true,
+                message: "Credenciales enviadas por email exitosamente",
+                n8nResponse: { 
+                    message: "Respuesta no JSON del webhook",
+                    rawResponse: responseText.substring(0, 200) // Primeros 200 caracteres
+                }
+            };
+        }
+        
+        return {
+            success: true,
+            message: "Credenciales enviadas por email exitosamente",
+            n8nResponse: result
+        };
+
+    } catch (error) {
+        console.error('Error enviando credenciales por email:', error);
+        return {
+            success: false,
+            message: "Error enviando credenciales por email",
+            error: error.message
+        };
+    }
+};
+
 const sendOTPByEmail = async (email, code, userName, userType) => {
     try {
         const webhookUrl = process.env.N8N_WEBHOOK_URL_LOGIN;
@@ -6944,6 +7135,76 @@ module.exports = {
     // FUNCIONES DE DIAGNÓSTICO
     testN8NWebhook,
     // FUNCIONES PARA SUGERENCIA DE ABONOS
-    suggestPaymentAmounts
+    suggestPaymentAmounts,
+    // FUNCIONES PARA ENVÍO DE CREDENCIALES
+    sendCredentialsByEmail,
+    sendCredentialsByEmailEndpoint
     
+};
+
+/**
+ * Endpoint para enviar credenciales por email manualmente
+ * @param {Object} req - Request object
+ * @param {Object} res - Response object
+ */
+const sendCredentialsByEmailEndpoint = async (req, res) => {
+    try {
+        const { email, userName, userType, password } = req.body;
+
+        // Validaciones
+        if (!email || !userName || !userType || !password) {
+            return res.status(400).json({
+                status: "Error",
+                message: "Todos los campos son obligatorios: email, userName, userType, password"
+            });
+        }
+
+        // Validar formato de email
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                status: "Error",
+                message: "Formato de email inválido"
+            });
+        }
+
+        // Validar tipo de usuario
+        if (!['trabajador', 'admin'].includes(userType)) {
+            return res.status(400).json({
+                status: "Error",
+                message: "userType debe ser 'trabajador' o 'admin'"
+            });
+        }
+
+        // Enviar credenciales
+        const result = await sendCredentialsByEmail(email, userName, userType, password);
+
+        if (result.success) {
+            return res.status(200).json({
+                status: "Success",
+                message: "Credenciales enviadas por email exitosamente",
+                data: {
+                    email: email,
+                    userName: userName,
+                    userType: userType,
+                    timestamp: new Date().toISOString()
+                },
+                n8nResponse: result.n8nResponse
+            });
+        } else {
+            return res.status(500).json({
+                status: "Error",
+                message: "Error enviando credenciales por email",
+                error: result.error || result.message
+            });
+        }
+
+    } catch (error) {
+        console.error('Error en sendCredentialsByEmailEndpoint:', error);
+        return res.status(500).json({
+            status: "Error",
+            message: "Error interno del servidor",
+            error: error.message
+        });
+    }
 };
