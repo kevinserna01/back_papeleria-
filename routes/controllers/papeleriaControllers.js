@@ -2428,6 +2428,20 @@ const createUser = async (req, res) => {
 
     await db.collection('usuarios').insertOne(newUser);
 
+    // Enviar credenciales por email
+    try {
+      const emailResult = await sendCredentialsByEmail(email, name, role, password);
+      console.log('Resultado del envío de credenciales:', emailResult);
+      
+      if (!emailResult.success) {
+        console.warn('No se pudieron enviar las credenciales por email:', emailResult.message);
+        // No fallar la creación si el email falla, solo loguear el warning
+      }
+    } catch (emailError) {
+      console.error('Error enviando credenciales por email:', emailError);
+      // No fallar la creación si el email falla, solo loguear el error
+    }
+
     return res.status(201).json({
       status: "Success",
       message: "Usuario creado correctamente.",
@@ -2437,7 +2451,8 @@ const createUser = async (req, res) => {
         email: newUser.email,
         role: newUser.role,
         status: newUser.status
-      }
+      },
+      emailSent: true
     });
 
   } catch (error) {

@@ -25,7 +25,14 @@ Esta funcionalidad permite enviar automáticamente las credenciales de acceso (e
 - **Campos requeridos**: `correo`, `contraseña`
 - **Campos opcionales**: `nombre` (si no se proporciona, usa 'Administrador' por defecto)
 
-### 4. Envío Manual de Credenciales
+### 4. Creación de Usuarios
+- **Endpoint**: `POST /createUserapi`
+- **Función**: `createUser`
+- **Funcionalidad**: Después de crear exitosamente un usuario, se envían las credenciales por email
+- **Campos requeridos**: `name`, `email`, `password`, `role`
+- **Webhook**: Usa `N8N_WEBHOOK_URL_BIENVENIDA`
+
+### 5. Envío Manual de Credenciales
 - **Endpoint**: `POST /send-credentials-email`
 - **Función**: `sendCredentialsByEmailWrapper`
 - **Funcionalidad**: Permite enviar credenciales por email de forma manual
@@ -36,12 +43,13 @@ Esta funcionalidad permite enviar automáticamente las credenciales de acceso (e
 
 ### Variable Principal
 ```env
-N8N_WEBHOOK_URL_CREDENTIALS=http://localhost:5678/webhook/send-credentials
+N8N_WEBHOOK_URL_BIENVENIDA=http://localhost:5678/webhook/send-credentials
 ```
 
-### Variable de Respaldo
-Si `N8N_WEBHOOK_URL_CREDENTIALS` no está definida, el sistema usará:
+### Variables de Respaldo
+Si `N8N_WEBHOOK_URL_BIENVENIDA` no está definida, el sistema usará:
 ```env
+N8N_WEBHOOK_URL_CREDENTIALS=http://localhost:5678/webhook/send-credentials
 N8N_WEBHOOK_URL_LOGIN=http://localhost:5678/webhook/send-otp
 ```
 
@@ -140,6 +148,18 @@ curl -X POST http://localhost:4000/registeradmin \
     "correo": "admin@ejemplo.com",
     "contraseña": "admin123",
     "nombre": "Administrador Principal"
+  }'
+```
+
+### Probar Creación de Usuario
+```bash
+curl -X POST http://localhost:4000/createUserapi \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Juan Pérez",
+    "email": "juan@ejemplo.com",
+    "password": "password123",
+    "role": "user"
   }'
 ```
 
