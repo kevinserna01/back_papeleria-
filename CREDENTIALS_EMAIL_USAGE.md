@@ -27,6 +27,7 @@ Esta funcionalidad permite enviar automáticamente las credenciales de acceso (e
 
 ### 4. Envío Manual de Credenciales
 - **Endpoint**: `POST /send-credentials-email`
+- **Función**: `sendCredentialsByEmailWrapper`
 - **Funcionalidad**: Permite enviar credenciales por email de forma manual
 - **Campos requeridos**: `email`, `userName`, `userType`, `password`
 - **Uso**: Útil para reenviar credenciales o enviar credenciales a usuarios existentes

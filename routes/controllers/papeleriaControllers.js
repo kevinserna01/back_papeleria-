@@ -7138,20 +7138,20 @@ module.exports = {
     suggestPaymentAmounts,
     // FUNCIONES PARA ENVÍO DE CREDENCIALES
     sendCredentialsByEmail,
-    sendCredentialsByEmailEndpoint
+    sendCredentialsByEmailWrapper
     
 };
 
 /**
- * Endpoint para enviar credenciales por email manualmente
+ * Wrapper simple para enviar credenciales por email como endpoint
  * @param {Object} req - Request object
  * @param {Object} res - Response object
  */
-const sendCredentialsByEmailEndpoint = async (req, res) => {
+const sendCredentialsByEmailWrapper = async (req, res) => {
     try {
         const { email, userName, userType, password } = req.body;
 
-        // Validaciones
+        // Validaciones básicas
         if (!email || !userName || !userType || !password) {
             return res.status(400).json({
                 status: "Error",
@@ -7176,7 +7176,7 @@ const sendCredentialsByEmailEndpoint = async (req, res) => {
             });
         }
 
-        // Enviar credenciales
+        // Enviar credenciales usando la función interna
         const result = await sendCredentialsByEmail(email, userName, userType, password);
 
         if (result.success) {
@@ -7200,7 +7200,7 @@ const sendCredentialsByEmailEndpoint = async (req, res) => {
         }
 
     } catch (error) {
-        console.error('Error en sendCredentialsByEmailEndpoint:', error);
+        console.error('Error en sendCredentialsByEmailWrapper:', error);
         return res.status(500).json({
             status: "Error",
             message: "Error interno del servidor",
@@ -7208,3 +7208,4 @@ const sendCredentialsByEmailEndpoint = async (req, res) => {
         });
     }
 };
+
