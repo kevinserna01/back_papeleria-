@@ -7057,6 +7057,75 @@ const cleanupCodesEndpoint = async (req, res) => {
     }
 };
 
+/**
+ * Wrapper simple para enviar credenciales por email como endpoint
+ * @param {Object} req - Request object
+ * @param {Object} res - Response object
+ */
+const sendCredentialsByEmailWrapper = async (req, res) => {
+  try {
+      const { email, userName, userType, password } = req.body;
+
+      // Validaciones básicas
+      if (!email || !userName || !userType || !password) {
+          return res.status(400).json({
+              status: "Error",
+              message: "Todos los campos son obligatorios: email, userName, userType, password"
+          });
+      }
+
+      // Validar formato de email
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+          return res.status(400).json({
+              status: "Error",
+              message: "Formato de email inválido"
+          });
+      }
+
+      // Validar tipo de usuario
+      if (!['trabajador', 'admin'].includes(userType)) {
+          return res.status(400).json({
+              status: "Error",
+              message: "userType debe ser 'trabajador' o 'admin'"
+          });
+      }
+
+      // Enviar credenciales usando la función interna
+      const result = await sendCredentialsByEmail(email, userName, userType, password);
+
+      if (result.success) {
+          return res.status(200).json({
+              status: "Success",
+              message: "Credenciales enviadas por email exitosamente",
+              data: {
+                  email: email,
+                  userName: userName,
+                  userType: userType,
+                  timestamp: new Date().toISOString()
+              },
+              n8nResponse: result.n8nResponse
+          });
+      } else {
+          return res.status(500).json({
+              status: "Error",
+              message: "Error enviando credenciales por email",
+              error: result.error || result.message
+          });
+      }
+
+  } catch (error) {
+      console.error('Error en sendCredentialsByEmailWrapper:', error);
+      return res.status(500).json({
+          status: "Error",
+          message: "Error interno del servidor",
+          error: error.message
+      });
+  }
+};
+
+
+
 module.exports = {
     registertrabajador,
     loginTrabajador,
@@ -7140,72 +7209,5 @@ module.exports = {
     sendCredentialsByEmail,
     sendCredentialsByEmailWrapper
     
-};
-
-/**
- * Wrapper simple para enviar credenciales por email como endpoint
- * @param {Object} req - Request object
- * @param {Object} res - Response object
- */
-const sendCredentialsByEmailWrapper = async (req, res) => {
-    try {
-        const { email, userName, userType, password } = req.body;
-
-        // Validaciones básicas
-        if (!email || !userName || !userType || !password) {
-            return res.status(400).json({
-                status: "Error",
-                message: "Todos los campos son obligatorios: email, userName, userType, password"
-            });
-        }
-
-        // Validar formato de email
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-            return res.status(400).json({
-                status: "Error",
-                message: "Formato de email inválido"
-            });
-        }
-
-        // Validar tipo de usuario
-        if (!['trabajador', 'admin'].includes(userType)) {
-            return res.status(400).json({
-                status: "Error",
-                message: "userType debe ser 'trabajador' o 'admin'"
-            });
-        }
-
-        // Enviar credenciales usando la función interna
-        const result = await sendCredentialsByEmail(email, userName, userType, password);
-
-        if (result.success) {
-            return res.status(200).json({
-                status: "Success",
-                message: "Credenciales enviadas por email exitosamente",
-                data: {
-                    email: email,
-                    userName: userName,
-                    userType: userType,
-                    timestamp: new Date().toISOString()
-                },
-                n8nResponse: result.n8nResponse
-            });
-        } else {
-            return res.status(500).json({
-                status: "Error",
-                message: "Error enviando credenciales por email",
-                error: result.error || result.message
-            });
-        }
-
-    } catch (error) {
-        console.error('Error en sendCredentialsByEmailWrapper:', error);
-        return res.status(500).json({
-            status: "Error",
-            message: "Error interno del servidor",
-            error: error.message
-        });
-    }
 };
 
