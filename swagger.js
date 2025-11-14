@@ -4,7 +4,7 @@ const options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'PymeTrack API - Sistema de Gestión de Papelería',
+      title: 'PymeTrack API - Sistema de Gestión para PymeTrack',
       version: '1.0.0',
       description: `
         API REST completa para gestión de papelería, incluyendo:
@@ -308,7 +308,7 @@ const options = {
       }
     ]
   },
-  apis: ['./swagger-docs.js']
+  apis: [__dirname + '/swagger-docs.js', './swagger-docs.js']
 };
 
 const swaggerSpec = swaggerJsdoc(options);

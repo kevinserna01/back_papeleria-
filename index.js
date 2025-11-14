@@ -28,11 +28,36 @@ app.use(urlencoded({ extended: true }));
 app.use(json());
 
 // Swagger Documentation
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-  customCss: '.swagger-ui .topbar { display: none }',
-  customSiteTitle: 'PymeTrack API Documentation',
-  customfavIcon: '/favicon.ico'
-}));
+try {
+  // Endpoint para servir el JSON de Swagger
+  app.get('/api-docs.json', (req, res) => {
+    try {
+      res.setHeader('Content-Type', 'application/json');
+      res.send(swaggerSpec);
+    } catch (error) {
+      console.error('Error sirviendo swagger.json:', error);
+      res.status(500).json({ error: 'Error generando documentación Swagger' });
+    }
+  });
+
+  // Swagger UI
+  app.use('/api-docs', swaggerUi.serve);
+  app.get('/api-docs', swaggerUi.setup(swaggerSpec, {
+    customCss: '.swagger-ui .topbar { display: none }',
+    customSiteTitle: 'PymeTrack API Documentation',
+    customfavIcon: '/favicon.ico',
+    explorer: true,
+    swaggerOptions: {
+      url: '/api-docs.json',
+      persistAuthorization: true,
+      displayRequestDuration: true
+    }
+  }));
+  
+  console.log('Swagger UI configurado correctamente en /api-docs');
+} catch (error) {
+  console.error('Error configurando Swagger:', error);
+}
 
 // Manejador para la ruta raíz
 app.get('/', (req, res) => {
