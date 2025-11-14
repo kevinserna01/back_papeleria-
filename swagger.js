@@ -7,7 +7,7 @@ const options = {
       title: 'PymeTrack API - Sistema de Gestión para PymeTrack',
       version: '1.0.0',
       description: `
-        API REST completa para gestión de papelería, incluyendo:
+        API REST completa para gestión de Pymes, incluyendo:
         - Gestión de productos e inventario
         - Sistema de ventas y facturación
         - Gestión de clientes y cartera
