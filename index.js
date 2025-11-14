@@ -4,6 +4,7 @@ const router = require('./routes/papeleria.routes.js');
 const cors = require('cors');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./swagger.js');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -40,11 +41,24 @@ try {
     }
   });
 
-  // Swagger UI - Configuración optimizada para Vercel
+  // Servir archivos estáticos de Swagger UI desde node_modules (para Vercel)
+  try {
+    const swaggerUiDistPath = path.join(__dirname, 'node_modules', 'swagger-ui-dist');
+    app.use('/swagger-ui', express.static(swaggerUiDistPath, { index: false }));
+  } catch (error) {
+    console.warn('No se pudo servir archivos estáticos desde node_modules:', error.message);
+  }
+
+  // Swagger UI - Configuración usando CDN para archivos estáticos (más confiable en Vercel)
   const swaggerUiOptions = {
     customCss: '.swagger-ui .topbar { display: none }',
     customSiteTitle: 'PymeTrack API Documentation',
     explorer: true,
+    customCssUrl: 'https://unpkg.com/swagger-ui-dist@5.30.2/swagger-ui.css',
+    customJs: [
+      'https://unpkg.com/swagger-ui-dist@5.30.2/swagger-ui-bundle.js',
+      'https://unpkg.com/swagger-ui-dist@5.30.2/swagger-ui-standalone-preset.js'
+    ],
     swaggerOptions: {
       url: '/api-docs.json',
       persistAuthorization: true,
@@ -53,7 +67,7 @@ try {
     }
   };
 
-  // Configurar Swagger UI - usar serveFiles para servir archivos estáticos correctamente en Vercel
+  // Configurar Swagger UI
   app.use('/api-docs', swaggerUi.serveFiles(swaggerSpec, swaggerUiOptions));
   app.get('/api-docs', swaggerUi.setup(swaggerSpec, swaggerUiOptions));
   
