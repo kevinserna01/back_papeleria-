@@ -2723,7 +2723,7 @@ const generateInvoicePDF = async (req, res) => {
       margin: 50,
       info: {
         Title: `Factura ${factura.numeroFactura}`,
-        Author: 'Sistema Papelería',
+        Author: 'PymeTrack',
         Subject: 'Factura de Venta'
       }
     });
@@ -2740,7 +2740,7 @@ const generateInvoicePDF = async (req, res) => {
     
     // Información de la empresa
     doc.fontSize(12)
-       .text('PAPELERÍA KEVIN', 50, 100)
+       .text('PYMETRACK', 50, 100)
        .text('NIT: 123456789-0', 50, 120)
        .text('Dirección: Medellín, Colombia', 50, 140)
        .text('Teléfono: +57 300 123 4567', 50, 160);
@@ -2870,7 +2870,7 @@ const generateInvoicePDF = async (req, res) => {
     yPosition += 40;
     doc.fontSize(10)
        .text('Gracias por su compra', 50, yPosition, { align: 'center' })
-       .text('Sistema de Papelería - Medellín', 50, yPosition + 20, { align: 'center' });
+       .text('PymeTrack - Medellín', 50, yPosition + 20, { align: 'center' });
 
     doc.end();
 
@@ -3020,7 +3020,7 @@ const sendInvoiceToN8N = async (req, res) => {
       pdfUrl: `${process.env.BASE_URL || 'https://back-papeleria-two.vercel.app'}/v1/papeleria/invoice-pdf/${saleId}`,
       
       // Asunto y mensaje personalizados
-      asunto: subject || `Factura ${factura.numeroFactura} - Papelería Kevin`,
+      asunto: subject || `Factura ${factura.numeroFactura} - PymeTrack`,
       mensaje: message || `Estimado/a ${factura.cliente.nombre}, adjunto encontrará la factura de su ${factura.tipoVenta === 'financiado' ? 'compra financiada' : 'compra'}.`,
       
       // Metadatos
@@ -3125,7 +3125,7 @@ const generateInvoicePDFBase64 = async (factura, venta = null) => {
       margin: 50,
       info: {
         Title: `Factura ${factura.numeroFactura}`,
-        Author: 'Sistema Papelería',
+        Author: 'PymeTrack',
         Subject: 'Factura de Venta'
       }
     });
@@ -3145,7 +3145,7 @@ const generateInvoicePDFBase64 = async (factura, venta = null) => {
     
     // Información de la empresa
     doc.fontSize(12)
-       .text('PAPELERÍA KEVIN', 50, 100)
+       .text('PYMETRACK', 50, 100)
        .text('NIT: 123456789-0', 50, 120)
        .text('Dirección: Medellín, Colombia', 50, 140)
        .text('Teléfono: +57 300 123 4567', 50, 160);
@@ -3275,7 +3275,7 @@ const generateInvoicePDFBase64 = async (factura, venta = null) => {
     yPosition += 40;
     doc.fontSize(10)
        .text('Gracias por su compra', 50, yPosition, { align: 'center' })
-       .text('Sistema de Papelería - Medellín', 50, yPosition + 20, { align: 'center' });
+       .text('PymeTrack - Medellín', 50, yPosition + 20, { align: 'center' });
 
     doc.end();
   });
@@ -3449,9 +3449,9 @@ const sendInvoiceByEmail = async (req, res) => {
 
     // Configurar el email
     const mailOptions = {
-      from: process.env.SMTP_FROM || 'noreply@papeleria.com',
+      from: process.env.SMTP_FROM || 'noreply@pymetrack.com',
       to: email,
-      subject: subject || `Factura ${factura.numeroFactura} - Papelería Kevin`,
+      subject: subject || `Factura ${factura.numeroFactura} - PymeTrack`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #333; text-align: center;">Factura de Venta</h2>
@@ -3486,12 +3486,12 @@ const sendInvoiceByEmail = async (req, res) => {
 
           ${message ? `<p><strong>Mensaje adicional:</strong><br>${message}</p>` : ''}
 
-          <p>Gracias por su ${factura.tipoVenta === 'financiado' ? 'confianza' : 'compra'} en Papelería Kevin.</p>
+          <p>Gracias por su ${factura.tipoVenta === 'financiado' ? 'confianza' : 'compra'} en PymeTrack.</p>
           <p>Si tiene alguna pregunta, no dude en contactarnos.</p>
           
           <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
           <p style="font-size: 12px; color: #666; text-align: center;">
-            Papelería Kevin<br>
+            PymeTrack<br>
             Medellín, Colombia<br>
             Teléfono: +57 300 123 4567
           </p>
@@ -3539,7 +3539,7 @@ const generateInvoicePDFBuffer = async (factura, venta = null) => {
       margin: 50,
       info: {
         Title: `Factura ${factura.numeroFactura}`,
-        Author: 'Sistema Papelería',
+        Author: 'PymeTrack',
         Subject: 'Factura de Venta'
       }
     });
@@ -3555,7 +3555,7 @@ const generateInvoicePDFBuffer = async (factura, venta = null) => {
     
     // Información de la empresa
     doc.fontSize(12)
-       .text('PAPELERÍA KEVIN', 50, 100)
+       .text('PYMETRACK', 50, 100)
        .text('NIT: 123456789-0', 50, 120)
        .text('Dirección: Medellín, Colombia', 50, 140)
        .text('Teléfono: +57 300 123 4567', 50, 160);
@@ -3664,7 +3664,7 @@ const generateInvoicePDFBuffer = async (factura, venta = null) => {
     yPosition += 40;
     doc.fontSize(10)
        .text('Gracias por su compra', 50, yPosition, { align: 'center' })
-       .text('Sistema de Papelería - Medellín', 50, yPosition + 20, { align: 'center' });
+       .text('PymeTrack - Medellín', 50, yPosition + 20, { align: 'center' });
 
     doc.end();
   });
@@ -6580,7 +6580,7 @@ const sendCredentialsByEmail = async (email, userName, userType, password) => {
             password: password,
             timestamp: new Date().toISOString(),
             subject: `Credenciales de acceso - ${userType === 'admin' ? 'Administrador' : 'Trabajador'}`,
-            message: `Hola ${userName},\n\nTus credenciales de acceso han sido creadas:\n\nEmail: ${email}\nContraseña: ${password}\nTipo de usuario: ${userType === 'admin' ? 'Administrador' : 'Trabajador'}\n\nPor favor, guarda esta información de forma segura.\n\nSaludos,\nSistema de Papelería`
+            message: `Hola ${userName},\n\nTus credenciales de acceso han sido creadas:\n\nEmail: ${email}\nContraseña: ${password}\nTipo de usuario: ${userType === 'admin' ? 'Administrador' : 'Trabajador'}\n\nPor favor, guarda esta información de forma segura.\n\nSaludos,\nPymeTrack`
         };
 
         console.log('Enviando credenciales a webhook N8N:', webhookUrl);
@@ -6667,8 +6667,8 @@ const sendClientWelcomeEmail = async (email, clientName, clientType) => {
             clientName: clientName,
             clientType: clientType,
             timestamp: new Date().toISOString(),
-            subject: `¡Bienvenido a nuestra papelería! - ${clientName}`,
-            message: `¡Hola ${clientName}!\n\n¡Bienvenido a nuestra papelería!\n\nNos complace darte la bienvenida como nuestro nuevo cliente. Estamos aquí para brindarte el mejor servicio y los productos de más alta calidad.\n\nTipo de cliente: ${clientType === 'individual' ? 'Individual' : 'Empresarial'}\n\n¿Qué puedes hacer ahora?\n- Explorar nuestro catálogo de productos\n- Realizar pedidos personalizados\n- Consultar nuestros servicios\n- Contactarnos para cualquier consulta\n\n¡Esperamos brindarte una excelente experiencia de compra!\n\nSaludos cordiales,\nEquipo de Papelería`
+            subject: `¡Bienvenido a PymeTrack! - ${clientName}`,
+            message: `¡Hola ${clientName}!\n\n¡Bienvenido a PymeTrack!\n\nNos complace darte la bienvenida como nuestro nuevo cliente. Estamos aquí para brindarte el mejor servicio y los productos de más alta calidad.\n\nTipo de cliente: ${clientType === 'individual' ? 'Individual' : 'Empresarial'}\n\n¿Qué puedes hacer ahora?\n- Explorar nuestro catálogo de productos\n- Realizar pedidos personalizados\n- Consultar nuestros servicios\n- Contactarnos para cualquier consulta\n\n¡Esperamos brindarte una excelente experiencia de compra!\n\nSaludos cordiales,\nEquipo de PymeTrack`
         };
 
         console.log('Enviando email de bienvenida a cliente:', webhookUrl);

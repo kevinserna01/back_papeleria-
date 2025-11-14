@@ -2,6 +2,8 @@ const express = require('express');
 const { urlencoded, json } = require('express');
 const router = require('./routes/papeleria.routes.js');
 const cors = require('cors');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpec = require('./swagger.js');
 require('dotenv').config();
 
 const app = express();
@@ -25,9 +27,16 @@ app.use(cors(corsOptions));
 app.use(urlencoded({ extended: true }));
 app.use(json());
 
+// Swagger Documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'PymeTrack API Documentation',
+  customfavIcon: '/favicon.ico'
+}));
+
 // Manejador para la ruta raíz
 app.get('/', (req, res) => {
-    res.send('Bienvenido al backend de Kevin!');
+    res.send('Bienvenido al backend de PymeTrack! Visita /api-docs para la documentación completa de la API.');
 });
 
 app.use('/v1/papeleria', router);
