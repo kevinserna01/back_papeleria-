@@ -40,19 +40,22 @@ try {
     }
   });
 
-  // Swagger UI
-  app.use('/api-docs', swaggerUi.serve);
-  app.get('/api-docs', swaggerUi.setup(swaggerSpec, {
+  // Swagger UI - Configuración optimizada para Vercel
+  const swaggerUiOptions = {
     customCss: '.swagger-ui .topbar { display: none }',
     customSiteTitle: 'PymeTrack API Documentation',
-    customfavIcon: '/favicon.ico',
     explorer: true,
     swaggerOptions: {
       url: '/api-docs.json',
       persistAuthorization: true,
-      displayRequestDuration: true
+      displayRequestDuration: true,
+      tryItOutEnabled: true
     }
-  }));
+  };
+
+  // Configurar Swagger UI - usar serveFiles para servir archivos estáticos correctamente en Vercel
+  app.use('/api-docs', swaggerUi.serveFiles(swaggerSpec, swaggerUiOptions));
+  app.get('/api-docs', swaggerUi.setup(swaggerSpec, swaggerUiOptions));
   
   console.log('Swagger UI configurado correctamente en /api-docs');
 } catch (error) {
