@@ -15,6 +15,8 @@ const options = {
         - Reportes y análisis
         - Autenticación y usuarios
         - Generación de PDFs y envío de facturas por email
+        
+        PymeTrack es un sistema completo de gestión empresarial diseñado para pequeñas y medianas empresas.
       `,
       contact: {
         name: 'Kevin Serna',
